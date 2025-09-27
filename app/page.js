@@ -1,8 +1,7 @@
 
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
-import { Groq } from 'groq-sdk';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { 
   Bot, 
@@ -23,10 +22,39 @@ import {
   Plus,
   Trash2,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Phone
 } from 'lucide-react';
 
+
 export default function Home() {
+  // Add custom CSS animations
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes fade-in {
+        0% { opacity: 0; transform: translateY(10px); }
+        100% { opacity: 1; transform: translateY(0); }
+      }
+      
+      .animate-fade-in {
+        animation: fade-in 0.8s ease-out;
+      }
+      
+      @keyframes gradient-shift {
+        0%, 100% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+      }
+      
+      .animate-gradient {
+        background-size: 200% 200%;
+        animation: gradient-shift 4s ease infinite;
+      }
+    `;
+    document.head.appendChild(style);
+    
+    return () => document.head.removeChild(style);
+  }, []);
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [selectedLanguage, setSelectedLanguage] = useState('English');
@@ -40,26 +68,36 @@ export default function Home() {
   const [isMinimized, setIsMinimized] = useState(false);
   const [loadingChatId, setLoadingChatId] = useState(null);
   const [forceSaveFlag, setForceSaveFlag] = useState(0);
+  const [isChromaEnabled, setIsChromaEnabled] = useState(false);
+  const [contextResults, setContextResults] = useState([]);
+  const [selectedModel, setSelectedModel] = useState('sarvam-m');
+  const [availableModels, setAvailableModels] = useState([]);
+  const [isTTSLoading, setIsTTSLoading] = useState(false);
+  const [currentAudio, setCurrentAudio] = useState(null);
+  const [isEmbedded, setIsEmbedded] = useState(false);
+  const [currentGreetingIndex, setCurrentGreetingIndex] = useState(0);
+  const [showFallbackDialog, setShowFallbackDialog] = useState(false);
+  const [fallbackData, setFallbackData] = useState({});
+  const [userContact, setUserContact] = useState({ name: '', phone: '' });
+  const [submittingFallback, setSubmittingFallback] = useState(false);
   const messagesEndRef = useRef(null);
+  const audioRef = useRef(null);
 
-  // Initialize Groq client
-  const groq = new Groq({
-    apiKey: process.env.NEXT_PUBLIC_GROQ_API_KEY,
-    dangerouslyAllowBrowser: true
-  });
+
 
   const languages = [
     'English', 'हिन्दी (Hindi)', 'मराठी (Marathi)', 
-    'தமிழ் (Tamil)', 'বাংলা (Bengali)', 'ગુજરાતી (Gujarati)'
+    'தமிழ் (Tamil)', 'বাংলা (Bengali)', 'ગુજરાતી (Gujarati)', 'ಕನ್ನಡ (Kannada)'
   ];
 
   const welcomeMessages = [
     { lang: 'English', text: 'Hello! I\'m MEENA, your educational assistant.' },
-    { lang: 'हिन्दी', text: 'नमस्ते! मैं मीना हूं, आपकी शैक्षिक सहायक।' },
-    { lang: 'मराठी', text: 'नमस्कार! मी मीना आहे, तुमची शैक्षिक सहाय्यक।' },
-    { lang: 'தமிழ்', text: 'வணக்கம்! நான் மீனா, உங்கள் கல்வி உதவியாளர்.' },
-    { lang: 'বাংলা', text: 'নমস্কার! আমি মীনা, আপনার শিক্ষা সহায়ক।' },
-    { lang: 'ગુજરાતી', text: 'નમસ્તે! હું મીના છું, તમારી શૈક્ષિક સહાયક।' }
+    { lang: 'हिन्दी', text: 'नमस्ते! मैं MEENA हूं, आपकी शैक्षिक सहायक।' },
+    { lang: 'मराठी', text: 'नमस्कार! मी MEENA आहे, तुमची शैक्षिक सहाय्यक।' },
+    { lang: 'தமிழ்', text: 'வணக்கம்! நான் MEENA, உங்கள் கல்வி உதவியாளர்.' },
+    { lang: 'বাংলা', text: 'নমস্কার! আমি MEENA, আপনার শিক্ষা সহায়ক।' },
+    { lang: 'ગુજરાતી', text: 'નમસ્તે! હું MEENA છું, તમારી શૈક્ષિક સહાયક।' },
+    { lang: 'ಕನ್ನಡ', text: 'ನಮಸ್ಕಾರ! ನಾನು MEENA, ನಿಮ್ಮ ಶೈಕ್ಷಣಿಕ ಸಹಾಯಕ।' }
   ];
 
   const faqSuggestions = [
@@ -70,13 +108,270 @@ export default function Home() {
 
   const sidebarLinks = [
     { icon: HelpCircle, text: 'FAQ', category: 'help' },
-    { icon: Settings, text: 'Dashboard', category: 'admin' },
+    { icon: Settings, text: 'Admin Dashboard', category: 'admin' },
     { icon: BookOpen, text: 'Notices', category: 'notices' }
   ];
 
+  // Define fetchAvailableModels early to prevent initialization issues
+  const fetchAvailableModels = useCallback(async () => {
+    try {
+      const response = await fetch('/api/chat');
+      const data = await response.json();
+      console.log('🔍 API Response:', data);
+      
+      if (data.models) {
+        const availableModelsList = data.models.filter(model => model.available);
+        console.log('📋 Available models from API:', availableModelsList);
+        setAvailableModels(availableModelsList);
+        
+        // Set SarvamAI as default if available
+        const sarvamModel = availableModelsList.find(model => model.id === 'sarvam-m');
+        console.log('🚀 SarvamAI model found:', sarvamModel);
+        
+        if (sarvamModel && !selectedModel) {
+          setSelectedModel(sarvamModel.id);
+        }
+      }
+    } catch (error) {
+      console.warn('Could not fetch available models:', error);
+      // Set default models if API fails
+      setAvailableModels([
+        { id: 'sarvam-m', name: 'Sarvam-M', provider: 'sarvam', category: 'Primary', available: true },
+        { id: 'gemma2-9b-it', name: 'Gemma 2 9B', provider: 'groq', category: 'Alternative', available: true }
+      ]);
+    }
+  }, [selectedModel]);
+
+  // Helper function to check if response indicates lack of knowledge
+  const checkForHumanFallback = (response, query) => {
+    const lowKnowledgeIndicators = [
+      "i don't know",
+      "i'm not sure",
+      "i don't have information",
+      "i cannot provide",
+      "i'm unable to",
+      "i don't have enough information",
+      "i'm not aware",
+      "i cannot find",
+      "no information available",
+      "not in my knowledge",
+      "unable to provide",
+      "i don't have details",
+      "sorry, i don't know",
+      "i'm not familiar",
+      "no specific information",
+      "cannot determine",
+      "insufficient information",
+      "does not mention",
+      "no mention of",
+      "not mentioned",
+      "no reference to",
+      "there is no mention",
+      "information does not include",
+      "knowledge base does not contain",
+      "not found in the information",
+      "no details available about",
+      "information provided does not",
+      "no specific details about",
+      "not covered in the available",
+      "recommend contacting",
+      "contact the department",
+      "reach out to"
+    ];
+
+    // User explicitly asking for human support
+    const humanRequestPatterns = [
+      "connect me to human",
+      "talk to human",
+      "speak to human",
+      "human support",
+      "human assistance",
+      "contact support",
+      "support team",
+      "human staff",
+      "live support",
+      "customer support",
+      "human agent",
+      "real person",
+      "speak to someone",
+      "talk to someone",
+      "connect to staff",
+      "human help",
+      "manual support",
+      "contact staff",
+      "reach human",
+      "get human help",
+      "human representative",
+      "live agent",
+      "speak with staff",
+      "connect with human",
+      "human operator",
+      "contact human",
+      "need human",
+      "want human",
+      "human expert",
+      "live chat",
+      "customer service",
+      "help desk",
+      "support desk"
+    ];
+    
+    const responseText = response.toLowerCase();
+    const queryText = query.toLowerCase();
+    
+    // Check if user explicitly requested human support
+    const userRequestsHuman = humanRequestPatterns.some(pattern => 
+      queryText.includes(pattern) || 
+      queryText.includes(pattern.replace(/\s+/g, '')) // Check without spaces too
+    );
+    
+    // If user explicitly asks for human, trigger immediately
+    if (userRequestsHuman) {
+      console.log('🤖➡️👨 User explicitly requested human support:', query);
+      return true;
+    }
+    
+    // 🎯 SPECIAL LLM TRIGGER CODE - Works in any language/punctuation
+    // LLM can include this code anywhere in response to trigger human fallback
+    const specialTriggerCode = "HUMAN_FALLBACK_TRIGGER_7439";
+    if (response.includes(specialTriggerCode)) {
+      console.log('🚨 LLM triggered human fallback with special code');
+      return true;
+    }
+    
+    // Check for direct knowledge gap indicators in AI response
+    const hasKnowledgeGap = lowKnowledgeIndicators.some(indicator => responseText.includes(indicator));
+    
+    // Check for pattern where AI suggests contacting someone (indicates knowledge gap)
+    const suggestsContact = responseText.includes("recommend contacting") || 
+                           responseText.includes("contact the") || 
+                           responseText.includes("reach them via") ||
+                           responseText.includes("you can reach") ||
+                           (responseText.includes("email:") && responseText.includes("phone:"));
+    
+    // Check if response is deflecting to external sources
+    const isDeflecting = responseText.includes("for the most accurate") ||
+                        responseText.includes("for updated information") ||
+                        responseText.includes("contact") && responseText.includes("directly");
+    
+    return hasKnowledgeGap || (suggestsContact && isDeflecting);
+  };
+
+  // Function to show human fallback dialog
+  const showHumanFallbackDialog = (query, aiResponse) => {
+    setFallbackData({ query, aiResponse });
+    setShowFallbackDialog(true);
+  };
+
+  // Function to submit human fallback request
+  const submitHumanFallback = async () => {
+    if (!userContact.phone.trim()) {
+      alert('Please provide your phone number so we can contact you.');
+      return;
+    }
+
+    try {
+      setSubmittingFallback(true);
+      
+      const response = await fetch('/api/human-fallback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: fallbackData.query,
+          userContact: {
+            name: userContact.name || 'Anonymous',
+            phone: userContact.phone,
+            chatId: null // Can be set for Telegram users
+          },
+          originalResponse: fallbackData.aiResponse,
+          context: {
+            previousMessages: messages.slice(-5).map(msg => ({
+              role: msg.sender === 'user' ? 'user' : 'assistant',
+              content: msg.text
+            })),
+            sessionId: currentChatId,
+            platform: 'web'
+          },
+          category: 'general',
+          priority: 'medium',
+          metadata: {
+            userAgent: navigator.userAgent,
+            referrer: document.referrer,
+            knowledgeBaseHits: contextResults.length
+          }
+        })
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        // Add confirmation message to chat
+        const confirmationMessage = {
+          id: `confirmation-${Date.now()}`,
+          text: `✅ Your query has been forwarded to our human experts. We will contact you at ${userContact.phone} within 24 hours with a detailed response.`,
+          sender: 'meena',
+          timestamp: new Date(),
+          isSystemMessage: true
+        };
+        
+        setMessages(prev => [...prev, confirmationMessage]);
+        
+        // Close dialog and reset form
+        setShowFallbackDialog(false);
+        setUserContact({ name: '', phone: '' });
+        setFallbackData({});
+        
+        // Show success message
+        alert('Thank you! Your query has been forwarded to our human experts. We will contact you within 24 hours.');
+      } else {
+        alert('Failed to submit your request. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error submitting human fallback:', error);
+      alert('Failed to submit your request. Please try again.');
+    } finally {
+      setSubmittingFallback(false);
+    }
+  };
+
+  
+  // Animated greeting effect
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    const interval = setInterval(() => {
+      setCurrentGreetingIndex((prev) => (prev + 1) % welcomeMessages.length);
+    }, 3000); // Change every 3 seconds
+
+    return () => clearInterval(interval);
+  }, [welcomeMessages.length]);
+
+  useEffect(() => {
+    // Check if running in embedded mode
+    const urlParams = new URLSearchParams(window.location.search);
+    setIsEmbedded(urlParams.get('embedded') === 'true');
+    
+    initializeChromaDB();
+    fetchAvailableModels();
+  }, [fetchAvailableModels]);
+
+  // Cleanup audio on component unmount
+  useEffect(() => {
+    return () => {
+      // Stop any playing audio
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+      }
+      // Stop browser TTS
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, [currentAudio]);
+
+
+
+  // Note: Removed automatic language-based model switching
+  // Users can manually select between SarvamAI (primary) and Groq Gemma 2 (alternative)
 
   useEffect(() => {
     // Initialize Speech Recognition
@@ -91,7 +386,8 @@ export default function Home() {
                        selectedLanguage.includes('मराठी') ? 'mr-IN' :
                        selectedLanguage.includes('தமிழ்') ? 'ta-IN' :
                        selectedLanguage.includes('বাংলা') ? 'bn-IN' :
-                       selectedLanguage.includes('ગુજરાતી') ? 'gu-IN' : 'en-US';
+                       selectedLanguage.includes('ગુજરાતી') ? 'gu-IN' :
+                       selectedLanguage.includes('ಕನ್ನಡ') ? 'kn-IN' : 'en-US';
 
       recognition.onstart = () => {
         setIsListening(true);
@@ -145,6 +441,11 @@ export default function Home() {
         }
       }
     }
+  }, []);
+
+  // Initialize ChromaDB on component mount
+  useEffect(() => {
+    initializeChromaDB();
   }, []);
 
   // Save messages to localStorage whenever messages change
@@ -215,10 +516,147 @@ export default function Home() {
         return updatedHistory;
       });
     }
-  }, [messages.length, currentChatId, selectedLanguage, forceSaveFlag]); // Added forceSaveFlag dependency
+  }, [messages, currentChatId, selectedLanguage, forceSaveFlag]); // Added forceSaveFlag dependency
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  // ChromaDB Integration Functions
+  const initializeChromaDB = async () => {
+    console.log('\n🚀 ===== INITIALIZING CHROMADB =====');
+    try {
+      console.log('📡 Sending GET request to /api/chromadb...');
+      const response = await fetch('/api/chromadb', {
+        method: 'GET'
+      });
+      
+      console.log('📊 ChromaDB init response status:', response.status);
+      const result = await response.json();
+      console.log('📋 ChromaDB init result:', result);
+      
+      if (result.success) {
+        setIsChromaEnabled(true);
+        console.log('✅ ChromaDB ENABLED - Context search will work');
+        console.log('📊 Stats:', result.stats);
+      } else {
+        console.warn('❌ ChromaDB initialization FAILED:', result.error);
+        console.warn('⚠️ MEENA will respond without context');
+      }
+    } catch (error) {
+      console.error('❌ ChromaDB connection ERROR:', error.message);
+      console.warn('⚠️ MEENA will respond without context');
+    }
+  };
+
+  const storeChatMessage = async (messageData) => {
+    if (!isChromaEnabled) return;
+    
+    try {
+      // Don't store empty or system messages
+      if (!messageData.text || messageData.text.trim() === '') return;
+      
+      const response = await fetch('/api/chromadb', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          action: 'add_chat_message',
+          data: {
+            id: messageData.id,
+            text: messageData.text,
+            sender: messageData.sender,
+            chatId: currentChatId,
+            userId: 'current_user', // You can make this dynamic
+            language: selectedLanguage,
+            timestamp: messageData.timestamp
+          }
+        })
+      });
+      
+      if (response.ok) {
+        console.log('📝 Message stored in ChromaDB:', messageData.id);
+      }
+    } catch (error) {
+      console.warn('Warning: Failed to store message in ChromaDB:', error);
+    }
+  };
+
+  const searchKnowledgeBase = async (query) => {
+    console.log('🔍 FRONTEND: searchKnowledgeBase called');
+    console.log(`  Query: "${query}"`);
+    console.log(`  ChromaEnabled: ${isChromaEnabled}`);
+    
+    if (!isChromaEnabled || !query) {
+      console.log('❌ Search skipped: ChromaDB not enabled or empty query');
+      return [];
+    }
+    
+    try {
+      console.log('📡 Sending request to /api/chromadb...');
+      const response = await fetch('/api/chromadb', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          action: 'search_knowledge',
+          data: { query, limit: 3 }
+        })
+      });
+      
+      console.log(`📡 Response status: ${response.status}`);
+      const result = await response.json();
+      console.log('📡 Full Response data:', JSON.stringify(result, null, 2));
+      
+      if (result.success && result.results) {
+        console.log(`✅ Found ${result.results.length} relevant knowledge entries`);
+        console.log('📋 Detailed results:');
+        result.results.forEach((item, i) => {
+          console.log(`  ${i + 1}. Title: ${item.title || 'No title'}`);
+          console.log(`      Content: ${(item.text || item.content || 'No content').substring(0, 100)}...`);
+          console.log(`      Category: ${item.category || 'No category'}`);
+          console.log(`      Similarity: ${item.similarity?.toFixed(3) || 'No similarity'}`);
+        });
+        return result.results;
+      } else {
+        console.log('❌ Search failed or no results:', result.error);
+        return [];
+      }
+      
+    } catch (error) {
+      console.error('❌ Knowledge search failed:', error);
+      return [];
+    }
+  };
+
+  const getChatContext = async (chatId) => {
+    if (!isChromaEnabled || !chatId) return [];
+    
+    try {
+      const response = await fetch('/api/chromadb', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          action: 'get_chat_context',
+          data: { chatId, contextLimit: 5 }
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success && result.context) {
+        return result.context;
+      }
+      
+      return [];
+    } catch (error) {
+      console.warn('Warning: Chat context retrieval failed:', error);
+      return [];
+    }
   };
 
   const handleSendMessage = async () => {
@@ -236,6 +674,70 @@ export default function Home() {
       setIsLoading(true);
       
       try {
+        // Search for relevant context using ChromaDB
+        let contextualInfo = '';
+        console.log('\n🔍 ===== FRONTEND CONTEXT SEARCH DEBUG =====');
+        console.log('🔧 ChromaDB Enabled:', isChromaEnabled);
+        console.log('📝 User Input:', currentInput);
+        console.log('🆔 Current Chat ID:', currentChatId);
+        
+        if (isChromaEnabled) {
+          console.log('🚀 Starting parallel context search...');
+          
+          const [knowledgeResults, chatContext] = await Promise.all([
+            searchKnowledgeBase(currentInput),
+            getChatContext(currentChatId)
+          ]);
+          
+          console.log('📊 DETAILED SEARCH RESULTS:');
+          console.log('  📚 Knowledge Results Count:', knowledgeResults.length);
+          console.log('  💬 Chat Context Count:', chatContext.length);
+          
+          if (knowledgeResults.length > 0) {
+            console.log('  📋 Knowledge Results Details:');
+            knowledgeResults.forEach((result, index) => {
+              console.log(`    ${index + 1}. Title: ${result.title || result.metadata?.title || 'No title'}`);
+              console.log(`       Category: ${result.category || result.metadata?.category || 'No category'}`);
+              console.log(`       Content: ${(result.text || result.content || '').substring(0, 100)}...`);
+            });
+          } else {
+            console.log('  ❌ No knowledge base matches found');
+          }
+          
+          if (knowledgeResults.length > 0) {
+            contextualInfo = '\n\nRELEVANT CONTEXT:\n' + 
+              knowledgeResults.map(result => `- ${result.text || result.content}`).join('\n');
+            setContextResults(knowledgeResults);
+            
+            console.log('✅ CONTEXT GENERATION SUCCESS:');
+            console.log('📖 Knowledge entries being added to prompt:');
+            knowledgeResults.forEach((result, i) => {
+              console.log(`  ${i + 1}. "${result.title}" (${(result.content || result.text)?.length} chars)`);
+            });
+            console.log(`📝 Final contextual info length: ${contextualInfo.length} characters`);
+            
+            // Show context preview that will be sent to LLM
+            console.log('🔍 EXACT CONTEXT BEING SENT TO LLM:');
+            console.log('─'.repeat(60));
+            console.log(contextualInfo);
+            console.log('─'.repeat(60));
+            
+          } else {
+            console.log('❌ NO CONTEXT WILL BE SENT TO LLM - Knowledge base empty or no matches');
+            console.log('❌ NO KNOWLEDGE CONTEXT FOUND!');
+            console.log('⚠️ This means MEENA will respond generically without MANIT-specific information');
+          }
+          
+          if (chatContext.length > 0) {
+            console.log('💬 Using chat history context:', chatContext.length, 'messages');
+          }
+        } else {
+          console.log('❌ ChromaDB not enabled - no context will be added');
+        }
+        
+        // Store user message in ChromaDB
+        await storeChatMessage(userMessage);
+        
         // Create a placeholder message for MEENA's response
         const meenaMessageId = Date.now() + 1;
         const meenaMessage = {
@@ -248,116 +750,147 @@ export default function Home() {
         
         setMessages(prev => [...prev, meenaMessage]);
         
-        // Language instruction based on selected language
-        const languageInstruction = selectedLanguage !== 'English' 
-          ? `Please respond in ${selectedLanguage}. ` 
-          : '';
+        // Prepare enhanced user message with context
+        let enhancedMessage = currentInput;
+        let hasContext = contextualInfo && contextualInfo.trim().length > 0;
         
-        // Create chat completion with streaming
-        const chatCompletion = await groq.chat.completions.create({
-          messages: [
-            {
-              role: "system",
-              content: `You are MEENA, a Multilingual Embeddable Educational Natural Language Assistant for Maulana Azad National Institute of Technology (MANIT), Bhopal. You help students with academic queries, campus information, and administrative processes.
+        if (hasContext) {
+          enhancedMessage = `${currentInput}
 
-CURRENT ACADEMIC INFORMATION (2025-26):
-- Mid-Semester Exams: September 28 - October 5, 2025
-- End-Semester Exams: December 15 - December 30, 2025
-- Fee Payment Deadline: October 15, 2025 (Late fee ₹500 after this date)
-- Scholarship Application Deadline: October 20, 2025
-- Library Hours: 8:00 AM - 10:00 PM (Mon-Sat), 9:00 AM - 6:00 PM (Sunday)
-- Hostel Fee: ₹5,000 - 10,000 per semester
-- Mess Fee: ₹27,000 per semester
-- Academic Fee: ₹65,000 per semester (B.Tech), ₹75,000 (M.Tech)
+---
+📚 RELEVANT INFORMATION FROM MANIT KNOWLEDGE BASE:
+${contextualInfo}
+---
 
-DEPARTMENTS & PROGRAMS:
-- Computer Science & Engineering (CSE)
-- Electronics & Communication (ECE)
-- Mechanical Engineering (ME)
-- Civil Engineering (CE)
-- Electrical Engineering (EE)
-- Chemical Engineering (ChE)
-- Architecture & Planning
-- MBA, MCA, M.Tech, PhD programs
+Please answer my question using the relevant information provided above. Be specific and cite the information when possible. If the information is not available in the knowledge base, please mention that I should contact the appropriate MANIT office for the most current details.`;
+          
+          console.log('\n✅ ENHANCED USER MESSAGE WITH CONTEXT:');
+          console.log('📝 Original Question:', currentInput);
+          console.log('📋 Context Added:', 'YES');
+          console.log('📏 Enhanced Message Length:', enhancedMessage.length);
+          console.log('🔍 Enhanced Message Preview:');
+          console.log(enhancedMessage.substring(0, 300) + '...');
+        } else {
+          console.log('\n❌ NO CONTEXT ENHANCEMENT:');
+          console.log('📝 Original Message Only:', currentInput);
+          console.log('📋 Context Available:', 'NO');
+        }
 
-CAMPUS FACILITIES:
-- Central Library (24/7 during exams)
-- Computer Center with high-speed internet
-- Sports Complex with gym, swimming pool, courts
-- Medical Center (8 AM - 8 PM)
-- Canteens: Main Canteen, Food Court, Amul Parlor
-- Bank: SBI branch inside campus
-- ATMs: SBI, HDFC, ICICI available
+        // Call the chat API
+        console.log('\n🤖 CHAT API CALL DETAILS:');
+        console.log(`📝 Message Type: ${hasContext ? 'Enhanced with Context' : 'Original Only'}`);
+        console.log(`🌐 Language: ${selectedLanguage}`);
+        console.log(`🎯 Model: ${selectedModel}`);
+        console.log(`� Context Length: ${contextualInfo.length} chars`);
+        console.log(`✅ Has Context: ${hasContext ? 'YES' : 'NO'}`);
+        
+        // Prepare conversation history for context (last 10 messages, excluding the current one being added)
+        const conversationHistory = messages.filter(msg => 
+          msg.sender && msg.text && !msg.isStreaming && !msg.isError
+        ).slice(-10); // Last 10 complete messages for context
 
-HOSTEL INFORMATION:
-Hostel Information:
-- Boys' Hostels:
-    • Hostel No. 1: Homi Jehangir Bhabha Bhawan
-    • Hostel No. 2: Vikram Sarabhai Bhawan
-    • Hostel No. 5: Mokshagundam Visvesvarayya Bhawan
-    • Hostel No. 6: Jagadish Chandra Bhawan
-    • Hostel No. 8: Ramanujan Bhavan
-    • Hostel No. 10: A.P.J. Abdul Kalam Chhatrawas (CD Block) - for 1st to 3rd year boys  
-        ◦ Triple Sharing: ₹5000 / semester  
-        ◦ Dual Sharing: ₹7500 / semester  
-        ◦ Single Room: ₹10000 / semester
-    • NRI Hostel: Raja Ramanna Bhawan
-    • Energy Centre (boys' facility)
-- Girls' Hostel:
-    • Hostel No. 7: Kalpana Chawla Bhawan
+        console.log('💬 Sending conversation history:', conversationHistory.length, 'messages');
+        if (conversationHistory.length > 0) {
+          console.log('📝 History preview:', conversationHistory.map(m => 
+            `${m.sender}: ${m.text.substring(0, 50)}...`
+          ));
+        }
 
-
-CONTACT INFORMATION:
-- Academic Office: 0755-2670803
-- Hostel Office: 0755-2670805
-- Medical Center: 0755-2670807
-- Training & Placement: 0755-2670810
-
-RECENT NOTICES:
-- Registration for Winter Training Programs starts October 1
-- Placement drive for 2025 batch begins November 1 
-- Cultural fest "Techno-Mania" , Maffick scheduled for March 2026
-- New ERP system login credentials distributed
-
-You must communicate naturally in English, Hindi, Punjabi, Marathi, Tamil, Telugu and other Indian regional languages. Keep replies concise, accurate, and conversational. If information is not available in the database, politely mention that the query will be escalated to the academic office. Always maintain a professional, student-friendly tone. ${languageInstruction}`
-            },
-            {
-              role: "user",
-              content: currentInput
-            }
-          ],
-          model: "gemma2-9b-it",
-          temperature: 1,
-          max_completion_tokens: 1024,
-          top_p: 1,
-          stream: true,
-          stop: null
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            message: enhancedMessage,
+            originalMessage: currentInput,
+            language: selectedLanguage,
+            contextualInfo: contextualInfo,
+            model: selectedModel,
+            hasContext: hasContext,
+            conversationHistory: conversationHistory
+          })
         });
+        
+        console.log(`📡 Chat API Response Status: ${response.status}`);
+        
+        if (!response.ok) {
+          throw new Error(`API request failed: ${response.status}`);
+        }
+        
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
 
         let fullResponse = '';
         
         // Process streaming response
         try {
-          for await (const chunk of chatCompletion) {
-            const content = chunk.choices[0]?.delta?.content || '';
-            fullResponse += content;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
             
-            // Update the message with streaming content
-            setMessages(prev => prev.map(msg => 
-              msg.id === meenaMessageId 
-                ? { ...msg, text: fullResponse, isStreaming: true }
-                : msg
-            ));
+            const chunk = decoder.decode(value);
+            const lines = chunk.split('\n');
+            
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  if (data.content) {
+                    fullResponse += data.content;
+                    
+                    // Clean trigger code from display during streaming
+                    const displayResponse = fullResponse.replace(/HUMAN_FALLBACK_TRIGGER_7439/g, '').trim();
+                    
+                    // Update the message with streaming content
+                    setMessages(prev => prev.map(msg => 
+                      msg.id === meenaMessageId 
+                        ? { ...msg, text: displayResponse, isStreaming: true }
+                        : msg
+                    ));
+                  } else if (data.done) {
+                    break;
+                  } else if (data.error) {
+                    throw new Error(data.error);
+                  }
+                } catch (parseError) {
+                  console.warn('Failed to parse streaming data:', parseError);
+                }
+              }
+            }
           }
+          
+          // Clean the response by removing trigger code before displaying
+          const cleanedResponse = fullResponse.replace(/HUMAN_FALLBACK_TRIGGER_7439/g, '').trim();
           
           // Mark streaming as complete - ensure this always happens
           setMessages(prev => prev.map(msg => 
             msg.id === meenaMessageId 
-              ? { ...msg, text: fullResponse, isStreaming: false, hasAttachment: Math.random() > 0.8 }
+              ? { ...msg, text: cleanedResponse, isStreaming: false, hasAttachment: Math.random() > 0.8 }
               : msg
           ));
           
           console.log('✅ Streaming completed, response length:', fullResponse.length);
+          console.log('🧹 Cleaned response length:', cleanedResponse.length);
+          
+          // Check if response indicates lack of knowledge - trigger human fallback
+          const shouldTriggerFallback = checkForHumanFallback(fullResponse, currentInput);
+          if (shouldTriggerFallback) {
+            setTimeout(() => {
+              showHumanFallbackDialog(currentInput, cleanedResponse);
+            }, 1000);
+          }
+          
+          // Store MEENA's response in ChromaDB
+          if (fullResponse.trim()) {
+            const meenaResponseMessage = {
+              id: meenaMessageId,
+              text: fullResponse,
+              sender: 'meena',
+              timestamp: new Date()
+            };
+            await storeChatMessage(meenaResponseMessage);
+          }
           
           // Force a save check after streaming completes by changing forceSaveFlag
           setTimeout(() => {
@@ -382,7 +915,7 @@ You must communicate naturally in English, Hindi, Punjabi, Marathi, Tamil, Telug
         }
         
       } catch (error) {
-        console.error('Error calling Groq API:', error);
+        console.error('Error calling Chat API:', error);
         
         // Ensure any streaming message is marked as complete with error
         setMessages(prev => prev.map(msg => 
@@ -450,9 +983,202 @@ You must communicate naturally in English, Hindi, Punjabi, Marathi, Tamil, Telug
     setInputValue(faq);
   };
 
-  const speakText = (text) => {
+  const speakText = async (text) => {
+    try {
+      setIsTTSLoading(true);
+      
+      // Stop any currently playing audio
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+      }
+      
+      // Stop browser TTS if running
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+
+      // Smart text chunking for better TTS results
+      if (text.length > 800) {
+        console.log('📝 Long text detected, using smart chunking for better TTS');
+        await speakTextInChunks(text);
+        return;
+      }
+      
+      console.log('🔊 Starting SarvamAI TTS for:', {
+        text: text.substring(0, 50) + '...',
+        fullTextLength: text.length,
+        language: selectedLanguage
+      });
+      
+      // Debug: Show the exact text being sent to TTS
+      console.log('📝 FULL TTS TEXT BEING SENT:');
+      console.log('─'.repeat(80));
+      console.log(text);
+      console.log('─'.repeat(80));
+      console.log(`📊 Total characters: ${text.length}`);
+      
+      // Call SarvamAI TTS API
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: text,
+          language: selectedLanguage
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success && result.data.audioBase64) {
+        console.log('✅ SarvamAI TTS successful, playing audio');
+        
+        // Create audio from base64
+        const audioBlob = new Blob(
+          [Uint8Array.from(atob(result.data.audioBase64), c => c.charCodeAt(0))],
+          { type: 'audio/wav' }
+        );
+        
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const audio = new Audio(audioUrl);
+        
+        // Set up audio event listeners
+        audio.onloadeddata = () => {
+          console.log('🎵 Audio loaded, starting playback');
+        };
+        
+        audio.onended = () => {
+          console.log('🎵 Audio playback completed');
+          setCurrentAudio(null);
+          URL.revokeObjectURL(audioUrl);
+        };
+        
+        audio.onerror = (e) => {
+          console.error('❌ Audio playback error:', e);
+          fallbackToBasicTTS(text);
+        };
+        
+        // Store current audio reference and play
+        setCurrentAudio(audio);
+        await audio.play();
+        
+      } else if (result.fallback) {
+        console.log('⚠️ SarvamAI TTS not available, using browser TTS');
+        fallbackToBasicTTS(text);
+      } else {
+        throw new Error(result.error || 'TTS conversion failed');
+      }
+      
+    } catch (error) {
+      console.error('❌ SarvamAI TTS Error:', error);
+      fallbackToBasicTTS(text);
+    } finally {
+      setIsTTSLoading(false);
+    }
+  };
+  
+  // Smart text chunking for long texts
+  const speakTextInChunks = async (text) => {
+    console.log('🔀 Chunking text for better TTS:', text.length, 'characters');
+    
+    // Split text intelligently at sentence boundaries
+    const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
+    const chunks = [];
+    let currentChunk = '';
+    
+    for (const sentence of sentences) {
+      const testChunk = currentChunk + (currentChunk ? '. ' : '') + sentence.trim();
+      
+      if (testChunk.length <= 700) { // Leave buffer under 800
+        currentChunk = testChunk;
+      } else {
+        if (currentChunk) {
+          chunks.push(currentChunk + '.');
+          currentChunk = sentence.trim();
+        } else {
+          // Single sentence too long, force add it
+          chunks.push(sentence.trim());
+        }
+      }
+    }
+    
+    // Add remaining chunk
+    if (currentChunk) {
+      chunks.push(currentChunk + (currentChunk.endsWith('.') ? '' : '.'));
+    }
+    
+    console.log('📋 Split into', chunks.length, 'chunks:', chunks.map(c => c.length + ' chars'));
+    
+    // Speak chunks sequentially
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      console.log(`🎙️ Speaking chunk ${i + 1}/${chunks.length}: "${chunk.substring(0, 50)}..."`);
+      
+      try {
+        await speakSingleChunk(chunk);
+        // Small pause between chunks
+        await new Promise(resolve => setTimeout(resolve, 500));
+      } catch (error) {
+        console.error(`❌ Error speaking chunk ${i + 1}:`, error);
+        // Continue with remaining chunks
+      }
+    }
+  };
+  
+  // Speak a single chunk of text
+  const speakSingleChunk = async (text) => {
+    try {
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: text,
+          language: selectedLanguage
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success && result.data.audioBase64) {
+        const audioBlob = new Blob(
+          [Uint8Array.from(atob(result.data.audioBase64), c => c.charCodeAt(0))],
+          { type: 'audio/wav' }
+        );
+        
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const audio = new Audio(audioUrl);
+        
+        // Return a promise that resolves when audio finishes
+        return new Promise((resolve, reject) => {
+          audio.onended = () => {
+            URL.revokeObjectURL(audioUrl);
+            resolve();
+          };
+          
+          audio.onerror = (e) => {
+            console.error('❌ Chunk audio error:', e);
+            URL.revokeObjectURL(audioUrl);
+            reject(e);
+          };
+          
+          audio.play().catch(reject);
+        });
+      } else {
+        throw new Error(result.error || 'Chunk TTS failed');
+      }
+    } catch (error) {
+      console.error('❌ Single chunk TTS error:', error);
+      throw error;
+    }
+  };
+
+  // Fallback to basic browser TTS
+  const fallbackToBasicTTS = (text) => {
     if ('speechSynthesis' in window) {
-      // Stop any ongoing speech
       window.speechSynthesis.cancel();
       
       const utterance = new SpeechSynthesisUtterance(text);
@@ -463,7 +1189,8 @@ You must communicate naturally in English, Hindi, Punjabi, Marathi, Tamil, Telug
                       selectedLanguage.includes('मराठी') ? 'mr-IN' :
                       selectedLanguage.includes('தமிழ்') ? 'ta-IN' :
                       selectedLanguage.includes('বাংলা') ? 'bn-IN' :
-                      selectedLanguage.includes('ગુજરાતી') ? 'gu-IN' : 'en-US';
+                      selectedLanguage.includes('ગુજરાતી') ? 'gu-IN' :
+                      selectedLanguage.includes('ಕನ್ನಡ') ? 'kn-IN' : 'en-US';
       
       utterance.rate = 0.9;
       utterance.pitch = 1;
@@ -481,7 +1208,8 @@ You must communicate naturally in English, Hindi, Punjabi, Marathi, Tamil, Telug
         setInputValue('Show me frequently asked questions');
         break;
       case 'admin':
-        setInputValue('I need help with administrative processes');
+        // Navigate to admin dashboard
+        window.open('/admin', '_blank');
         break;
       case 'notices':
         setInputValue('Show me recent notices and announcements');
@@ -673,6 +1401,138 @@ You must communicate naturally in English, Hindi, Punjabi, Marathi, Tamil, Telug
     setIsLoading(false);
   };
 
+  if (isEmbedded) {
+    return (
+      <div className="h-screen bg-white flex flex-col">
+        {/* Language Selector - Compact */}
+        <div className="bg-gray-50 border-b border-gray-200 p-2 flex justify-end">
+          <select
+            value={selectedLanguage}
+            onChange={(e) => setSelectedLanguage(e.target.value)}
+            className="bg-white border border-gray-300 text-gray-700 text-sm rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            {languages.map((lang) => (
+              <option key={lang} value={lang}>{lang}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Chat Messages */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {messages.length === 0 && (
+            <div className="text-center py-8">
+              <div className="w-16 h-16 bg-gradient-to-br from-blue-500 via-purple-600 to-pink-500 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
+                <Bot className="text-white" size={28} />
+              </div>
+              <h3 className="text-xl font-bold mb-3">
+                <span className="bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
+                  MEENA
+                </span>
+              </h3>
+              <div key={currentGreetingIndex} className="animate-fade-in mb-2">
+                <p className="text-lg font-semibold bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+                  {welcomeMessages[currentGreetingIndex].text}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">{welcomeMessages[currentGreetingIndex].lang}</p>
+              </div>
+              <p className="text-gray-600 text-sm font-medium">Ask me anything about MANIT!</p>
+            </div>
+          )}
+          
+          {messages.map((message, index) => (
+            <div key={index} className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`flex items-start space-x-2 max-w-xs lg:max-w-md ${message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}>
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                  message.sender === 'user' ? 'bg-blue-600' : 'bg-gray-200'
+                }`}>
+                  {message.sender === 'user' ? (
+                    <User size={16} className="text-white" />
+                  ) : (
+                    <Bot size={16} className="text-gray-600" />
+                  )}
+                </div>
+                <div className={`px-3 py-2 text-sm ${
+                  message.sender === 'user' 
+                    ? 'rounded-lg bg-blue-600 text-white' 
+                    : 'rounded-full bg-gray-100 text-gray-800'
+                }`}>
+                  {message.sender === 'user' ? (
+                    message.text
+                  ) : (
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="text-gray-800">
+                        <ReactMarkdown
+                          components={{
+                            p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
+                            strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                            code: ({ children }) => <code className="bg-gray-100 px-1 rounded text-xs">{children}</code>,
+                            ul: ({ children }) => <ul className="list-disc ml-3 mb-1">{children}</ul>,
+                            ol: ({ children }) => <ol className="list-decimal ml-3 mb-1">{children}</ol>,
+                            li: ({ children }) => <li className="mb-0.5">{children}</li>
+                          }}
+                        >
+                          {message.text}
+                        </ReactMarkdown>
+                      </div>
+                      <button
+                        onClick={() => handleTTS(message.text)}
+                        disabled={isTTSLoading}
+                        className="flex-shrink-0 p-1 rounded hover:bg-gray-200 transition-colors"
+                        title="Listen to response"
+                      >
+                        <Volume2 size={14} className={isTTSLoading ? 'text-gray-400' : 'text-gray-600'} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+          
+          {isLoading && (
+            <div className="flex justify-start">
+              <div className="flex items-start space-x-2">
+                <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
+                  <Bot size={16} className="text-gray-600" />
+                </div>
+                <div className="bg-gray-100 rounded-lg px-3 py-2">
+                  <div className="flex space-x-1">
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input Area */}
+        <div className="border-t border-gray-200 p-3">
+          <div className="flex space-x-2">
+            <input
+              type="text"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
+              placeholder="Ask me anything..."
+              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={isLoading}
+            />
+            <button
+              onClick={handleSendMessage}
+              disabled={isLoading || !inputValue.trim()}
+              className="bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <Send size={16} />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen max-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex overflow-hidden">
       {/* Sidebar */}
@@ -826,44 +1686,146 @@ You must communicate naturally in English, Hindi, Punjabi, Marathi, Tamil, Telug
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col lg:ml-0 h-screen max-h-screen overflow-hidden">
         {/* Header */}
-        <header className="bg-white shadow-sm border-b border-gray-200 px-4 py-4 flex-shrink-0">
+        <header className="bg-white shadow-sm border-b border-gray-200 px-4 py-3 flex-shrink-0">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-3">
               <button 
                 onClick={() => setIsSidebarOpen(true)}
                 className="lg:hidden p-2 rounded-lg hover:bg-gray-100"
               >
-                <Menu size={24} />
+                <Menu size={22} />
               </button>
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-                  <Bot className="text-white" size={24} />
+                  <Bot className="text-white" size={20} />
                 </div>
                 <div>
                   <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
                     MEENA
                   </h1>
-                  <p className="text-sm text-gray-500">
+                  <p className="text-xs md:text-sm text-gray-500 hidden sm:block">
                     {messages.length > 0 
                       ? `Current Chat • ${messages.length} messages` 
                       : 'Educational Assistant'
                     }
                   </p>
+                  <p className="text-xs text-gray-400 hidden lg:block">
+                    Model: {selectedModel}
+                  </p>
                 </div>
               </div>
             </div>
             
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-3">
+              {/* Model Selector */}
               <div className="relative">
+                {/* Mobile - Short Code */}
                 <select 
-                  value={selectedLanguage}
-                  onChange={(e) => setSelectedLanguage(e.target.value)}
-                  className="appearance-none bg-white border border-gray-300 rounded-lg px-4 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800 font-medium"
+                  value={selectedModel}
+                  onChange={(e) => {
+                    console.log('🔄 Model changed to:', e.target.value);
+                    setSelectedModel(e.target.value);
+                  }}
+                  className="md:hidden appearance-none bg-white border border-gray-300 rounded-lg px-2 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-800 font-bold text-xs"
                   style={{
                     backgroundImage: 'none',
                     WebkitAppearance: 'none',
-                    MozAppearance: 'none'
+                    MozAppearance: 'none',
+                    minWidth: '50px'
                   }}
+                  title={`Current Model: ${selectedModel}`}
+                >
+                  {availableModels.map((model) => {
+                    const shortCode = model.category === 'Primary' ? 'SM' : 
+                                     model.name.includes('llama') ? 'LL' :
+                                     model.name.includes('gemma') ? 'GM' :
+                                     model.name.includes('mixtral') ? 'MX' : 'AI';
+                    return (
+                      <option 
+                        key={model.id} 
+                        value={model.id} 
+                        className="text-gray-800 bg-white py-2"
+                        disabled={!model.available}
+                      >
+                        {shortCode}
+                      </option>
+                    );
+                  })}
+                </select>
+                
+                {/* Desktop - Full Text */}
+                <select 
+                  value={selectedModel}
+                  onChange={(e) => {
+                    console.log('🔄 Model changed to:', e.target.value);
+                    setSelectedModel(e.target.value);
+                  }}
+                  className="hidden md:block appearance-none bg-white border border-gray-300 rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-800 font-medium text-sm"
+                  style={{
+                    backgroundImage: 'none',
+                    WebkitAppearance: 'none',
+                    MozAppearance: 'none',
+                    minWidth: '140px'
+                  }}
+                  title={`Current Model: ${selectedModel}`}
+                >
+                  {availableModels.map((model) => (
+                    <option 
+                      key={model.id} 
+                      value={model.id} 
+                      className="text-gray-800 bg-white py-2"
+                      disabled={!model.available}
+                    >
+                      {model.category === 'Primary' ? '🚀 Sarvam-M' : `🔄 ${model.name} (${model.provider.toUpperCase()})`} {!model.available ? ' (Not Available)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <Bot className="hidden md:block absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 pointer-events-none" size={16} />
+              </div>
+              
+              {/* Language Selector */}
+              <div className="relative">
+                {/* Mobile - Short Codes */}
+                <select 
+                  value={selectedLanguage}
+                  onChange={(e) => setSelectedLanguage(e.target.value)}
+                  className="md:hidden appearance-none bg-white border border-gray-300 rounded-lg px-2 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800 font-medium text-xs"
+                  style={{
+                    backgroundImage: 'none',
+                    WebkitAppearance: 'none',
+                    MozAppearance: 'none',
+                    minWidth: '50px'
+                  }}
+                  title={`Current Language: ${selectedLanguage}`}
+                >
+                  {languages.map((lang, index) => {
+                    const shortCode = lang === 'English' ? 'En' : 
+                                     lang.includes('हिन्दी') ? 'Hi' :
+                                     lang.includes('मराठी') ? 'Mr' :
+                                     lang.includes('தமிழ்') ? 'Ta' :
+                                     lang.includes('বাংলা') ? 'Bn' :
+                                     lang.includes('ગુજરાતી') ? 'Gu' :
+                                     lang.includes('ಕನ್ನಡ') ? 'Kn' : 'En';
+                    return (
+                      <option key={index} value={lang} className="text-gray-800 bg-white py-2">
+                        {shortCode}
+                      </option>
+                    );
+                  })}
+                </select>
+                
+                {/* Desktop - Full Text */}
+                <select 
+                  value={selectedLanguage}
+                  onChange={(e) => setSelectedLanguage(e.target.value)}
+                  className="hidden md:block appearance-none bg-white border border-gray-300 rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800 font-medium text-sm"
+                  style={{
+                    backgroundImage: 'none',
+                    WebkitAppearance: 'none',
+                    MozAppearance: 'none',
+                    minWidth: '120px'
+                  }}
+                  title={`Current Language: ${selectedLanguage}`}
                 >
                   {languages.map((lang, index) => (
                     <option key={index} value={lang} className="text-gray-800 bg-white py-2">
@@ -871,26 +1833,64 @@ You must communicate naturally in English, Hindi, Punjabi, Marathi, Tamil, Telug
                     </option>
                   ))}
                 </select>
-                <Globe className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 pointer-events-none" size={16} />
+                <Globe className="hidden md:block absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 pointer-events-none" size={16} />
               </div>
             </div>
           </div>
         </header>
 
         {/* Chat Messages Area */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0 bg-gradient-to-b from-transparent via-blue-50/30 to-purple-50/30">
           {messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center">
-              <div className="w-20 h-20 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center mb-6">
-                <Bot className="text-white" size={40} />
-              </div>
-              <h2 className="text-2xl font-bold text-gray-800 mb-4">Welcome to MEENA</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-w-4xl">
-                {welcomeMessages.map((msg, index) => (
-                  <div key={index} className="bg-white rounded-lg p-4 shadow-sm border border-gray-100">
-                    <p className="font-semibold text-gray-800 text-sm mb-2">{msg.lang}</p>
-                    <p className="text-gray-700 font-medium">{msg.text}</p>
+            <div className="flex flex-col items-center justify-center h-full text-center px-6">
+              {/* Hero Section */}
+              <div className="mb-8 text-center">
+                <div className="w-24 h-24 bg-gradient-to-br from-blue-500 via-purple-600 to-pink-500 rounded-full flex items-center justify-center mb-6 shadow-lg mx-auto">
+                  <Bot className="text-white" size={44} />
+                </div>
+                
+                {/* Gradient MEENA Title */}
+                <h1 className="text-6xl font-black mb-4 text-center">
+                  <span className="bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
+                    MEENA
+                  </span>
+                </h1>
+                
+                <p className="text-sm md:text-lg lg:text-xl text-gray-600 mb-2 font-medium text-center">
+                  Multilingual Educational Natural Language Assistant
+                </p>
+                
+                {/* Animated Greeting */}
+                <div className="h-12 md:h-16 flex items-center justify-center">
+                  <div key={currentGreetingIndex} className="animate-fade-in text-center">
+                    <p className="text-lg md:text-xl lg:text-2xl font-bold bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+                      {welcomeMessages[currentGreetingIndex].text.includes('MEENA') ? (
+                        <>
+                          {welcomeMessages[currentGreetingIndex].text.split('MEENA')[0]}
+                          <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">MEENA</span>
+                          {welcomeMessages[currentGreetingIndex].text.split('MEENA')[1]}
+                        </>
+                      ) : (
+                        welcomeMessages[currentGreetingIndex].text
+                      )}
+                    </p>
+                    <p className="text-xs md:text-sm text-gray-500 mt-1 font-medium">
+                      {welcomeMessages[currentGreetingIndex].lang}
+                    </p>
                   </div>
+                </div>
+              </div>
+
+              {/* Quick Actions */}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-w-2xl">
+                {faqSuggestions.slice(0, 6).map((suggestion, index) => (
+                  <button
+                    key={index}
+                    onClick={() => setInputValue(suggestion)}
+                    className="bg-white/80 backdrop-blur-sm hover:bg-white border border-gray-200 hover:border-blue-300 rounded-xl p-3 text-sm font-medium text-gray-700 hover:text-blue-600 transition-all duration-200 hover:shadow-md hover:-translate-y-0.5"
+                  >
+                    {suggestion}
+                  </button>
                 ))}
               </div>
             </div>
@@ -919,7 +1919,7 @@ You must communicate naturally in English, Hindi, Punjabi, Marathi, Tamil, Telug
                       {message.sender === 'user' ? (
                         <p className="text-white font-semibold">{message.text}</p>
                       ) : (
-                        <div className="text-gray-800 font-semibold prose prose-sm max-w-none">
+                        <div className="text-gray-800 font-semibold">
                           <ReactMarkdown
                             components={{
                               p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
@@ -960,11 +1960,28 @@ You must communicate naturally in English, Hindi, Punjabi, Marathi, Tamil, Telug
                       {message.sender === 'meena' && !message.isStreaming && !message.isError && (
                         <div className="flex items-center space-x-2 mt-2">
                           <button 
-                            className="p-1 rounded hover:bg-gray-100" 
-                            title="Listen to response"
-                            onClick={() => speakText(message.text)}
+                            className={`p-1 rounded transition-colors ${
+                              isTTSLoading 
+                                ? 'bg-blue-100 cursor-wait' 
+                                : 'hover:bg-gray-100 hover:text-blue-600'
+                            }`}
+                            title={isTTSLoading ? 'Converting to speech...' : 'Listen with SarvamAI TTS (Arya voice)'}
+                            onClick={() => {
+                              console.log('🎙️ TTS Button clicked for message:', {
+                                messageId: message.id,
+                                textLength: message.text?.length || 0,
+                                isStreaming: message.isStreaming,
+                                textPreview: message.text?.substring(0, 100) + '...'
+                              });
+                              speakText(message.text);
+                            }}
+                            disabled={isTTSLoading}
                           >
-                            <Volume2 size={14} className="text-gray-600" />
+                            {isTTSLoading ? (
+                              <div className="animate-spin w-3.5 h-3.5 border-2 border-blue-500 border-t-transparent rounded-full"></div>
+                            ) : (
+                              <Volume2 size={14} className="text-gray-600" />
+                            )}
                           </button>
                           {message.hasAttachment && (
                             <button className="p-1 rounded hover:bg-gray-100" title="View attachment">
@@ -982,25 +1999,46 @@ You must communicate naturally in English, Hindi, Punjabi, Marathi, Tamil, Telug
           )}
         </div>
 
-        {/* FAQ Suggestions */}
-        {messages.length === 0 && (
-          <div className="px-4 py-2 flex-shrink-0">
-            <div className="flex flex-wrap gap-2 justify-center">
-              {faqSuggestions.map((faq, index) => (
-                <button
-                  key={index}
-                  onClick={() => handleFAQClick(faq)}
-                  className="px-4 py-2 bg-white border border-gray-300 rounded-full text-sm text-gray-800 font-medium hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
-                >
-                  {faq}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+
 
         {/* Input Area */}
         <div className="bg-white border-t border-gray-200 p-4 flex-shrink-0">
+          {/* ChromaDB Status Indicator - Hidden */}
+          {false && isChromaEnabled && contextResults.length > 0 && (
+            <div className="mb-3 px-3 py-2 bg-green-50 border border-green-200 rounded-lg">
+              <div className="flex items-center space-x-2 text-sm">
+                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                <span className="text-green-700 font-medium">
+                  🔍 Found {contextResults.length} relevant knowledge {contextResults.length === 1 ? 'entry' : 'entries'}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* SarvamAI Model Indicator - Hidden */}
+          {false && selectedModel === 'sarvam-m' && (
+            <div className="mb-3 px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg">
+              <div className="flex items-center space-x-2 text-sm">
+                <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
+                <span className="text-purple-700 font-medium">
+                  🚀 Using SarvamAI - Optimized for {selectedLanguage} & multilingual understanding
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* TTS Status Indicator */}
+          {isTTSLoading && (
+            <div className="mb-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center space-x-2 text-sm">
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                <span className="text-blue-700 font-medium">
+                  🎙️ Converting to speech with SarvamAI TTS - Arya voice ({selectedLanguage})
+                </span>
+              </div>
+            </div>
+          )}
+          
           <div className="flex items-center space-x-3">
             <div className="flex-1 relative">
               <textarea
@@ -1008,7 +2046,7 @@ You must communicate naturally in English, Hindi, Punjabi, Marathi, Tamil, Telug
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyPress={handleKeyPress}
                 placeholder="Type your question here..."
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none text-gray-800 font-medium placeholder-gray-500"
+                className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none text-gray-900 font-medium placeholder-gray-600 bg-white"
                 rows="1"
                 style={{ minHeight: '48px', maxHeight: '120px' }}
               />
@@ -1053,6 +2091,94 @@ You must communicate naturally in English, Hindi, Punjabi, Marathi, Tamil, Telug
           </div>
         </footer>
       </div>
+
+      {/* Human Fallback Dialog */}
+      {showFallbackDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200">
+              <h2 className="text-xl font-semibold text-gray-900">Need Human Assistance?</h2>
+              <p className="text-sm text-gray-600 mt-1">
+                It looks like I couldn&apos;t provide the information you need. Let me connect you with our human experts.
+              </p>
+            </div>
+            
+            <div className="p-6">
+              <div className="mb-4">
+                <h3 className="font-semibold text-gray-900 mb-2">Your Query:</h3>
+                <p className="text-gray-800 bg-blue-50 p-4 rounded-lg text-sm font-medium border border-blue-200">{fallbackData.query}</p>
+              </div>
+              
+              <div className="mb-4">
+                <h3 className="font-semibold text-gray-900 mb-2">AI Response:</h3>
+                <p className="text-gray-800 bg-orange-50 p-4 rounded-lg text-sm font-medium border border-orange-200">{fallbackData.aiResponse}</p>
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">
+                    Your Name (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={userContact.name}
+                    onChange={(e) => setUserContact(prev => ({ ...prev, name: e.target.value }))}
+                    className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                    placeholder="Enter your name"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">
+                    Phone Number <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    type="tel"
+                    value={userContact.phone}
+                    onChange={(e) => setUserContact(prev => ({ ...prev, phone: e.target.value }))}
+                    className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                    placeholder="Enter your phone number"
+                    required
+                  />
+                  <p className="text-sm text-gray-700 mt-2 font-medium">
+                    ✅ We&apos;ll contact you within 24 hours with a detailed response
+                  </p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setShowFallbackDialog(false);
+                  setUserContact({ name: '', phone: '' });
+                  setFallbackData({});
+                }}
+                className="px-6 py-3 text-gray-700 bg-gray-100 border-2 border-gray-300 rounded-lg hover:bg-gray-200 hover:border-gray-400 transition-colors font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitHumanFallback}
+                disabled={!userContact.phone.trim() || submittingFallback}
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2 font-medium shadow-md hover:shadow-lg transition-all"
+              >
+                {submittingFallback ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Submitting...
+                  </>
+                ) : (
+                  <>
+                    <Phone size={16} />
+                    Request Human Help
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

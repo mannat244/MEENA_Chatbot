@@ -1,0 +1,54 @@
+{
+  "knowledgeBase": {
+    "categories": {
+      "institutional": {
+        "description": "Basic information about MANIT",
+        "subcategories": ["overview", "history", "mission", "vision", "administration"]
+      },
+      "academics": {
+        "description": "Academic programs, calendar, and policies",
+        "subcategories": ["programs", "calendar", "policies", "examination", "grading", "curriculum"]
+      },
+      "admissions": {
+        "description": "Admission processes and requirements",
+        "subcategories": ["undergraduate", "postgraduate", "phd", "eligibility", "process", "dates"]
+      },
+      "departments": {
+        "description": "Department-wise information",
+        "subcategories": ["engineering", "architecture", "management", "faculty", "research"]
+      },
+      "facilities": {
+        "description": "Campus facilities and services",
+        "subcategories": ["library", "hostels", "dining", "medical", "sports", "transport"]
+      },
+      "student_services": {
+        "description": "Services available to students",
+        "subcategories": ["fees", "scholarships", "placements", "internships", "clubs", "activities"]
+      },
+      "research": {
+        "description": "Research opportunities and guidelines",
+        "subcategories": ["projects", "publications", "funding", "centers", "collaborations"]
+      },
+      "policies": {
+        "description": "Institutional policies and procedures",
+        "subcategories": ["academic", "disciplinary", "anti_ragging", "grievance", "code_of_conduct"]
+      },
+      "contact": {
+        "description": "Contact information and office details",
+        "subcategories": ["administration", "departments", "emergency", "helpdesk"]
+      }
+    },
+    "entry_structure": {
+      "required_fields": ["id", "title", "content", "category", "subcategory"],
+      "optional_fields": ["tags", "source", "last_updated", "priority", "related_entries", "attachments", "effective_date", "expiry_date"],
+      "metadata_fields": ["created_at", "updated_at", "version", "author", "reviewer", "status"]
+    },
+    "content_guidelines": {
+      "title": "Clear, descriptive title (50-100 characters)",
+      "content": "Detailed, accurate information (500-2000 characters for optimal embeddings)",
+      "structure": "Use clear paragraphs, bullet points where appropriate",
+      "language": "Professional, accessible English",
+      "updates": "Include date-sensitive information with validity periods"
+    }
+  }
+}

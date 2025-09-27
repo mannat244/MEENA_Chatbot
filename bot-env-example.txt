@@ -1,0 +1,35 @@
+# Add these to your .env.local file for bot integration
+
+# ===========================================
+# TELEGRAM BOT (Works Locally)
+# ===========================================
+# Get token from @BotFather on Telegram
+# 1. Message @BotFather
+# 2. Send /newbot
+# 3. Choose name and username
+# 4. Copy token below
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+
+# ===========================================
+# WHATSAPP BOT (Requires Public URL)
+# ===========================================
+# Get from Meta Developer Console
+# Requires ngrok or public deployment for local testing
+WHATSAPP_ACCESS_TOKEN=your_whatsapp_access_token
+WHATSAPP_PHONE_NUMBER_ID=your_phone_number_id
+WHATSAPP_VERIFY_TOKEN=your_custom_verify_token
+
+# ===========================================
+# FOR LOCAL DEVELOPMENT WITH NGROK
+# ===========================================
+# If using ngrok, set this to your ngrok URL
+# NEXTAUTH_URL=https://abc123.ngrok.io
+
+# ===========================================
+# QUICK START FOR LOCAL TESTING
+# ===========================================
+# 1. Add TELEGRAM_BOT_TOKEN above
+# 2. Run: npm run dev
+# 3. Visit: http://localhost:3000/api/telegram/polling
+# 4. Message your bot on Telegram
+# 5. MEENA will respond automatically!
