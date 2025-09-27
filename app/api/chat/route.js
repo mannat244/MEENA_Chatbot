@@ -3,6 +3,7 @@ import { SarvamAIClient } from 'sarvamai';
 import { NextResponse } from 'next/server';
 import dbConnect from '../../../lib/mongodb.js';
 import Chat from '../../../models/Chat.js';
+import { findLocationInQuery, generateMapResponse, CAMPUS_LOCATIONS } from '../../../lib/mapUtils.js';
 
 // Initialize Groq client
 const groq = new Groq({
@@ -42,6 +43,72 @@ export async function POST(request) {
         { error: 'Message is required' },
         { status: 400 }
       );
+    }
+
+    // 🗺️ Check if this is a location query
+    const locationQuery = findLocationInQuery(originalMessage || message);
+    if (locationQuery) {
+      console.log('🗺️ Location query detected:', locationQuery.name);
+      const mapResponse = generateMapResponse(locationQuery, originalMessage || message);
+      
+      if (mapResponse) {
+        console.log('✅ Returning pre-generated map response');
+        
+        // Create streaming response for consistency with other responses
+        const encoder = new TextEncoder();
+        
+        const stream = new ReadableStream({
+          async start(controller) {
+            try {
+              // Split response into chunks for streaming effect
+              const words = mapResponse.split(' ');
+              
+              for (let i = 0; i < words.length; i++) {
+                const wordToSend = (i > 0 ? ' ' : '') + words[i];
+                const data = `data: ${JSON.stringify({ content: wordToSend })}\n\n`;
+                controller.enqueue(encoder.encode(data));
+                
+                // Small delay for streaming effect
+                await new Promise(resolve => setTimeout(resolve, 30));
+              }
+              
+              // Send done signal
+              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+              controller.close();
+              
+              // Log the interaction for statistics
+              try {
+                await dbConnect();
+                const chatDoc = new Chat({
+                  message: originalMessage || message,
+                  response: mapResponse,
+                  timestamp: new Date(),
+                  language: language || 'English',
+                  hasContext: false,
+                  contextInfo: `Location query for: ${locationQuery.name}`,
+                  model: 'location_service'
+                });
+                await chatDoc.save();
+                console.log('📊 Location query logged to MongoDB');
+              } catch (dbError) {
+                console.warn('Database logging failed for location query:', dbError.message);
+              }
+              
+            } catch (error) {
+              console.error('Location response streaming error:', error);
+              controller.error(error);
+            }
+          }
+        });
+
+        return new Response(stream, {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive'
+          }
+        });
+      }
     }
 
     // Language instruction based on selected language
@@ -84,7 +151,16 @@ GUIDELINES:
 - Use previous conversation context to provide relevant follow-up responses
 - Reference earlier parts of the conversation when appropriate
 
-🔧 HUMAN FALLBACK TRIGGER:
+�️ LOCATION & MAP FUNCTIONALITY:
+When users ask about locations on campus (like "Where is NTB?", "Location of library", etc.), you can provide interactive maps by including:
+MAP_COORDINATES{"coordinates": [latitude, longitude], "title": "Location Name", "description": "Brief description"}
+
+Available campus locations include:
+- NTB (New Technology Block): 23.217438984792697, 77.40852269998584
+- H10 Block: 23.209486879043148, 77.41245462794596  
+- Library, Hostels, Main Gate, Sports Complex, Medical Center, etc.
+
+�🔧 HUMAN FALLBACK TRIGGER:
 If you cannot provide accurate information or if the user needs specialized human assistance, include this exact code anywhere in your response: HUMAN_FALLBACK_TRIGGER_7439
 This will automatically connect them to human support while showing your response. Use this for:
 - Complex administrative queries requiring verification

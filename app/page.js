@@ -3,6 +3,8 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
+import InteractiveMap from './components/InteractiveMap';
+import { renderTextWithMaps, parseMapCoordinates } from '../lib/mapUtils';
 import { 
   Bot, 
   User, 
@@ -26,6 +28,108 @@ import {
   Phone
 } from 'lucide-react';
 
+// Helper function to check if message contains maps
+const hasMapContent = (messageText) => {
+  const mapPattern = /MAP_COORDINATES\{[^}]+\}/g;
+  return mapPattern.test(messageText);
+};
+
+// Component to render messages with embedded maps
+const MessageWithMaps = ({ messageText, className = "" }) => {
+  console.log('🔍 MessageWithMaps received text:', messageText.substring(0, 200) + '...');
+  const { text, maps } = renderTextWithMaps(messageText, InteractiveMap);
+  console.log('🗺️ Maps found:', maps?.length || 0);
+  console.log('📝 Processed text:', text.substring(0, 200) + '...');
+  
+  // Standard markdown components for consistency with text wrapping
+  const markdownComponents = {
+    p: ({ children }) => <p className="mb-2 last:mb-0 break-words overflow-wrap-anywhere">{children}</p>,
+    strong: ({ children }) => <strong className="font-bold text-gray-900 break-words">{children}</strong>,
+    em: ({ children }) => <em className="italic break-words">{children}</em>,
+    ul: ({ children }) => <ul className="list-disc ml-4 mb-2">{children}</ul>,
+    ol: ({ children }) => <ol className="list-decimal ml-4 mb-2">{children}</ol>,
+    li: ({ children }) => <li className="mb-1 break-words">{children}</li>,
+    code: ({ children }) => <code className="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono text-gray-800 break-all">{children}</code>,
+    pre: ({ children }) => <pre className="bg-gray-100 p-2 rounded text-sm font-mono overflow-x-auto mb-2 whitespace-pre-wrap break-words">{children}</pre>,
+    h1: ({ children }) => <h1 className="text-lg font-bold mb-2 break-words">{children}</h1>,
+    h2: ({ children }) => <h2 className="text-md font-bold mb-2 break-words">{children}</h2>,
+    h3: ({ children }) => <h3 className="text-sm font-bold mb-1 break-words">{children}</h3>,
+    blockquote: ({ children }) => <blockquote className="border-l-4 border-gray-300 pl-3 italic mb-2 break-words">{children}</blockquote>,
+    a: ({ children, href }) => <a href={href} className="text-blue-600 hover:underline break-words" target="_blank" rel="noopener noreferrer">{children}</a>
+  };
+
+  if (!maps || maps.length === 0) {
+    return (
+      <div className={className}>
+        <ReactMarkdown components={markdownComponents}>
+          {messageText}
+        </ReactMarkdown>
+      </div>
+    );
+  }
+
+  // Split text by map placeholders and render inline maps
+  const parts = [];
+  let remainingText = text;
+
+  maps.forEach((map, index) => {
+    const placeholderIndex = remainingText.indexOf(map.placeholder);
+    
+    if (placeholderIndex !== -1) {
+      // Add text before the placeholder
+      if (placeholderIndex > 0) {
+        parts.push({
+          type: 'text',
+          content: remainingText.substring(0, placeholderIndex),
+          key: `text_${index}_before`
+        });
+      }
+      
+      // Add the inline map
+      parts.push({
+        type: 'map',
+        content: map,
+        key: `map_${index}`
+      });
+      
+      // Continue with remaining text
+      remainingText = remainingText.substring(placeholderIndex + map.placeholder.length);
+    }
+  });
+
+  // Add any remaining text
+  if (remainingText.trim()) {
+    parts.push({
+      type: 'text',
+      content: remainingText,
+      key: 'text_final'
+    });
+  }
+
+  return (
+    <div className={`${className} overflow-hidden`}>
+      {parts.map((part) => (
+        <div key={part.key} className="w-full overflow-hidden">
+          {part.type === 'text' ? (
+            <div className="break-words overflow-wrap-anywhere">
+              <ReactMarkdown components={markdownComponents}>
+                {part.content}
+              </ReactMarkdown>
+            </div>
+          ) : (
+            <div className="my-1 w-full overflow-hidden">
+              <InteractiveMap
+                coordinates={part.content.coordinates}
+                title={part.content.title}
+                description={part.content.description}
+              />
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+};
 
 export default function Home() {
   // Add custom CSS animations
@@ -1380,7 +1484,7 @@ Please answer my question using the relevant information provided above. Be spec
         </div>
 
         {/* Chat Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-4">
           {messages.length === 0 && (
             <div className="text-center py-8">
               <div className="w-16 h-16 bg-gradient-to-br from-blue-500 via-purple-600 to-pink-500 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
@@ -1403,7 +1507,7 @@ Please answer my question using the relevant information provided above. Be spec
           
           {messages.map((message, index) => (
             <div key={index} className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`flex items-start space-x-2 max-w-xs lg:max-w-md ${message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}>
+              <div className={`flex items-start space-x-2 max-w-[90vw] ${hasMapContent(message.text) ? 'lg:max-w-sm xl:max-w-lg' : 'lg:max-w-xs xl:max-w-md'} ${message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}>
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
                   message.sender === 'user' ? 'bg-blue-600' : 'bg-gray-200'
                 }`}>
@@ -1413,28 +1517,20 @@ Please answer my question using the relevant information provided above. Be spec
                     <Bot size={16} className="text-gray-600" />
                   )}
                 </div>
-                <div className={`px-3 py-2 text-sm ${
+                <div className={`px-3 py-2 text-sm min-w-0 flex-1 ${
                   message.sender === 'user' 
                     ? 'rounded-lg bg-blue-600 text-white' 
                     : 'rounded-full bg-gray-100 text-gray-800'
                 }`}>
                   {message.sender === 'user' ? (
-                    message.text
+                    <div className="break-words overflow-wrap-anywhere">{message.text}</div>
                   ) : (
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="text-gray-800">
-                        <ReactMarkdown
-                          components={{
-                            p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
-                            strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-                            code: ({ children }) => <code className="bg-gray-100 px-1 rounded text-xs">{children}</code>,
-                            ul: ({ children }) => <ul className="list-disc ml-3 mb-1">{children}</ul>,
-                            ol: ({ children }) => <ol className="list-decimal ml-3 mb-1">{children}</ol>,
-                            li: ({ children }) => <li className="mb-0.5">{children}</li>
-                          }}
-                        >
-                          {message.text}
-                        </ReactMarkdown>
+                    <div className="flex items-start justify-between gap-2 min-w-0">
+                      <div className="text-gray-800 min-w-0 flex-1">
+                        <MessageWithMaps 
+                          messageText={message.text}
+                          className="text-sm"
+                        />
                       </div>
                       <button
                         onClick={() => handleTTS(message.text)}
@@ -1802,7 +1898,7 @@ Please answer my question using the relevant information provided above. Be spec
         </header>
 
         {/* Chat Messages Area */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0 bg-gradient-to-b from-transparent via-blue-50/30 to-purple-50/30">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-4 min-h-0 bg-gradient-to-b from-transparent via-blue-50/30 to-purple-50/30">
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center px-6">
               {/* Hero Section */}
@@ -1860,7 +1956,7 @@ Please answer my question using the relevant information provided above. Be spec
             <>
               {messages.map((message) => (
                 <div key={message.id} className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`flex items-end space-x-2 max-w-xs lg:max-w-md ${message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}>
+                  <div className={`flex items-end space-x-2 max-w-[90vw] ${hasMapContent(message.text) ? 'lg:max-w-sm xl:max-w-lg' : 'lg:max-w-xs xl:max-w-md'} ${message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}>
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
                       message.sender === 'user' 
                         ? 'bg-blue-500' 
@@ -1871,7 +1967,7 @@ Please answer my question using the relevant information provided above. Be spec
                         <Bot className="text-white" size={16} />
                       }
                     </div>
-                    <div className={`rounded-lg px-4 py-2 ${
+                    <div className={`rounded-lg px-4 py-2 min-w-0 flex-1 ${
                       message.sender === 'user' 
                         ? 'bg-blue-500 text-white font-semibold' 
                         : message.isError
@@ -1879,28 +1975,10 @@ Please answer my question using the relevant information provided above. Be spec
                         : 'bg-white border border-gray-200 text-gray-800 font-semibold'
                     }`}>
                       {message.sender === 'user' ? (
-                        <p className="text-white font-semibold">{message.text}</p>
+                        <p className="text-white font-semibold break-words overflow-wrap-anywhere">{message.text}</p>
                       ) : (
-                        <div className="text-gray-800 font-semibold">
-                          <ReactMarkdown
-                            components={{
-                              p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                              strong: ({ children }) => <strong className="font-bold text-gray-900">{children}</strong>,
-                              em: ({ children }) => <em className="italic">{children}</em>,
-                              ul: ({ children }) => <ul className="list-disc ml-4 mb-2">{children}</ul>,
-                              ol: ({ children }) => <ol className="list-decimal ml-4 mb-2">{children}</ol>,
-                              li: ({ children }) => <li className="mb-1">{children}</li>,
-                              code: ({ children }) => <code className="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono text-gray-800">{children}</code>,
-                              pre: ({ children }) => <pre className="bg-gray-100 p-2 rounded text-sm font-mono overflow-x-auto mb-2">{children}</pre>,
-                              h1: ({ children }) => <h1 className="text-lg font-bold mb-2">{children}</h1>,
-                              h2: ({ children }) => <h2 className="text-md font-bold mb-2">{children}</h2>,
-                              h3: ({ children }) => <h3 className="text-sm font-bold mb-1">{children}</h3>,
-                              blockquote: ({ children }) => <blockquote className="border-l-4 border-gray-300 pl-3 italic mb-2">{children}</blockquote>,
-                              a: ({ children, href }) => <a href={href} className="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer">{children}</a>
-                            }}
-                          >
-                            {message.text}
-                          </ReactMarkdown>
+                        <div className="text-gray-800 font-semibold min-w-0">
+                          <MessageWithMaps messageText={message.text} />
                         </div>
                       )}
                       {message.isStreaming && (
