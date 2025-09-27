@@ -1,336 +1,403 @@
-// import { NextResponse } from 'next/server';
-// import pdf from 'pdf-parse';
-// import { GoogleGenerativeAI } from '@google/generative-ai';
+import { NextResponse } from 'next/server';
+import { GoogleGenAI } from '@google/genai';
 
-// const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+const genAI = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
 
-// // Dummy ChromaDB service to prevent build-time issues
-// const getDummyChromaService = () => ({
-//   initialize: async () => { 
-//     console.log('✅ Using dummy ChromaDB service'); 
-//     return true; 
-//   },
-//   addDocuments: async () => ({ 
-//     success: true, 
-//     message: 'Dummy storage - documents not actually stored' 
-//   })
-// });
+// Get ChromaDB service with runtime loading
+const getChromaService = async () => {
+  try {
+    const chromaDBModule = await import('@/lib/chromadb');
+    const service = chromaDBModule.default;
+    return service;
+  } catch (error) {
+    console.warn('ChromaDB loading failed:', error.message);
+    throw new Error('ChromaDB service unavailable');
+  }
+};
 
-// // Get ChromaDB service with runtime loading
-// const getChromaService = async () => {
-//   // During build or if ChromaDB fails, use dummy service
-//   if (process.env.NODE_ENV === 'production' || process.env.NEXT_PHASE === 'phase-production-build') {
-//     return getDummyChromaService();
-//   }
-  
-//   try {
-//     // Only load ChromaDB during actual runtime
-//     const { ChromaDBService } = await import('@/lib/chromadb');
-//     const service = new ChromaDBService();
-//     return service;
-//   } catch (error) {
-//     console.warn('ChromaDB loading failed, using dummy service:', error.message);
-//     return getDummyChromaService();
-//   }
-// };
+// Intelligent text chunking for processed content
+function chunkText(text, maxChunkSize = 1500, overlapSize = 300) {
+  if (!text || typeof text !== 'string') {
+    return [];
+  }
 
-// // Intelligent text chunking function (same as scraping)
-// function chunkText(text, maxChunkSize = 1000, overlapSize = 200) {
-//   if (!text || typeof text !== 'string') {
-//     return [];
-//   }
+  const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+  const chunks = [];
+  let currentChunk = '';
+  let currentSize = 0;
 
-//   const sentences = text.match(/[^\.!?]+[\.!?]+/g) || [text];
-//   const chunks = [];
-//   let currentChunk = '';
-//   let currentSize = 0;
-
-//   for (const sentence of sentences) {
-//     const sentenceLength = sentence.length;
+  for (const paragraph of paragraphs) {
+    const paragraphLength = paragraph.length;
     
-//     // If adding this sentence would exceed max size, save current chunk
-//     if (currentSize + sentenceLength > maxChunkSize && currentChunk.length > 0) {
-//       chunks.push(currentChunk.trim());
+    if (currentSize + paragraphLength > maxChunkSize && currentChunk.length > 0) {
+      chunks.push(currentChunk.trim());
       
-//       // Start new chunk with overlap from previous chunk
-//       const words = currentChunk.split(' ');
-//       const overlapWords = words.slice(-Math.floor(overlapSize / 5)); // Approximate word overlap
-//       currentChunk = overlapWords.join(' ') + ' ' + sentence;
-//       currentSize = currentChunk.length;
-//     } else {
-//       currentChunk += sentence;
-//       currentSize += sentenceLength;
-//     }
-//   }
+      const sentences = currentChunk.split(/[.!?]+/).filter(s => s.trim().length > 0);
+      const overlapSentences = sentences.slice(-2);
+      currentChunk = overlapSentences.join('. ') + '. ' + paragraph;
+      currentSize = currentChunk.length;
+    } else {
+      if (currentChunk) {
+        currentChunk += '\n\n' + paragraph;
+      } else {
+        currentChunk = paragraph;
+      }
+      currentSize += paragraphLength;
+    }
+  }
 
-//   // Add the last chunk if it exists
-//   if (currentChunk.trim().length > 0) {
-//     chunks.push(currentChunk.trim());
-//   }
+  if (currentChunk.trim().length > 0) {
+    chunks.push(currentChunk.trim());
+  }
 
-//   // Filter out very small chunks
-//   return chunks.filter(chunk => chunk.length > 50);
-// }
+  return chunks.filter(chunk => chunk.length > 100);
+}
 
-// // Generate metadata for PDF chunks
-// function generateMetadata(filename, chunkIndex, totalChunks, pageInfo = null) {
-//   const now = new Date();
+export async function POST(request) {
+  console.log('\n📄 ===== GEMINI MULTIMODAL PDF PROCESSING API =====');
   
-//   // Extract meaningful information from filename
-//   const baseName = filename.replace(/\.[^/.]+$/, ""); // Remove extension
-//   const fileType = filename.split('.').pop()?.toLowerCase() || 'pdf';
-  
-//   // Create hierarchical categories
-//   const categories = ['document', 'pdf'];
-  
-//   // Add category based on filename patterns
-//   if (baseName.toLowerCase().includes('syllabus')) categories.push('academic', 'syllabus');
-//   else if (baseName.toLowerCase().includes('notice')) categories.push('announcement', 'notice');
-//   else if (baseName.toLowerCase().includes('exam')) categories.push('academic', 'examination');
-//   else if (baseName.toLowerCase().includes('fee')) categories.push('administrative', 'fees');
-//   else if (baseName.toLowerCase().includes('admission')) categories.push('academic', 'admission');
-//   else if (baseName.toLowerCase().includes('result')) categories.push('academic', 'results');
-//   else if (baseName.toLowerCase().includes('timetable') || baseName.toLowerCase().includes('schedule')) categories.push('academic', 'schedule');
-//   else categories.push('general');
+  try {
+    const chromaService = await getChromaService();
+    await chromaService.initialize();
+    console.log('✅ ChromaDB service ready');
 
-//   return {
-//     // Source identification
-//     source: 'pdf_upload',
-//     filename: filename,
-//     document_name: baseName,
-//     file_type: fileType,
-    
-//     // Chunk positioning
-//     chunk_index: chunkIndex,
-//     total_chunks: totalChunks,
-//     chunk_position: `${chunkIndex + 1}/${totalChunks}`,
-    
-//     // Page information if available
-//     ...(pageInfo && {
-//       page_number: pageInfo.page,
-//       page_total: pageInfo.totalPages
-//     }),
-    
-//     // Categorization
-//     categories: categories,
-//     primary_category: categories[categories.length - 1],
-//     document_type: 'pdf',
-    
-//     // Temporal data
-//     upload_date: now.toISOString(),
-//     upload_timestamp: now.getTime(),
-//     date_readable: now.toLocaleDateString('en-IN'),
-    
-//     // Processing metadata
-//     processing_method: 'pdf_parse',
-//     chunk_method: 'sentence_aware_chunking',
-//     overlap_used: true,
-    
-//     // Search optimization
-//     searchable_title: `${baseName} - Chunk ${chunkIndex + 1}`,
-//     document_section: `Part ${chunkIndex + 1} of ${totalChunks}`,
-    
-//     // Quality indicators
-//     is_structured: true,
-//     content_quality: 'high',
-    
-//     // Administrative
-//     manit_related: true,
-//     requires_updates: false
-//   };
-// }
+    const formData = await request.formData();
+    const file = formData.get('file');
+    const options = {
+      maxChunkSize: parseInt(formData.get('maxChunkSize')) || 1500,
+      overlapSize: parseInt(formData.get('overlapSize')) || 300,
+      storeInKnowledge: formData.get('storeInKnowledge') === 'true',
+      analysisDepth: formData.get('analysisDepth') || 'standard'
+    };
 
-// export async function POST(request) {
-//   console.log('\n📄 ===== PDF PROCESSING API CALLED =====');
-  
-//   try {
-//     // Initialize ChromaDB service (or dummy if unavailable)
-//     const chromaService = await getChromaService();
-//     await chromaService.initialize();
-//     console.log('✅ ChromaDB service ready');
+    console.log('📋 Processing options:', options);
+    console.log('📁 File info:', {
+      name: file?.name,
+      size: file?.size,
+      type: file?.type
+    });
 
-//     const formData = await request.formData();
-//     const file = formData.get('file');
-//     const options = {
-//       maxChunkSize: parseInt(formData.get('maxChunkSize')) || 1000,
-//       overlapSize: parseInt(formData.get('overlapSize')) || 200,
-//       storeInKnowledge: formData.get('storeInKnowledge') === 'true'
-//     };
+    if (!file) {
+      return NextResponse.json({
+        success: false,
+        error: 'No file provided'
+      }, { status: 400 });
+    }
 
-//     console.log('📋 Processing options:', options);
-//     console.log('📁 File info:', {
-//       name: file?.name,
-//       size: file?.size,
-//       type: file?.type
-//     });
+    if (file.type !== 'application/pdf') {
+      return NextResponse.json({
+        success: false,
+        error: 'Only PDF files are supported'
+      }, { status: 400 });
+    }
 
-//     if (!file) {
-//       return NextResponse.json({
-//         success: false,
-//         error: 'No file provided'
-//       }, { status: 400 });
-//     }
+    const maxInlineSize = 20 * 1024 * 1024; // 20MB
+    const useFileAPI = file.size > maxInlineSize;
 
-//     if (file.type !== 'application/pdf') {
-//       return NextResponse.json({
-//         success: false,
-//         error: 'Only PDF files are supported'
-//       }, { status: 400 });
-//     }
+    console.log(`📄 Processing PDF with ${useFileAPI ? 'File API' : 'inline data'} (${(file.size / 1024 / 1024).toFixed(2)}MB)`);
 
-//     // Convert file to buffer
-//     const bytes = await file.arrayBuffer();
-//     const buffer = Buffer.from(bytes);
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
 
-//     console.log('📄 Starting PDF parsing...');
-    
-//     // Parse PDF
-//     let pdfData;
-//     try {
-//       pdfData = await pdf(buffer);
-//       console.log('✅ PDF parsed successfully');
-//       console.log('📊 PDF info:', {
-//         pages: pdfData.numpages,
-//         textLength: pdfData.text?.length || 0,
-//         hasText: !!pdfData.text
-//       });
-//     } catch (parseError) {
-//       console.error('❌ PDF parsing failed:', parseError);
-//       return NextResponse.json({
-//         success: false,
-//         error: 'Failed to parse PDF',
-//         details: parseError.message
-//       }, { status: 400 });
-//     }
+    let geminiFile = null;
+    let analysisResults = null;
 
-//     if (!pdfData.text || pdfData.text.trim().length === 0) {
-//       return NextResponse.json({
-//         success: false,
-//         error: 'No text content found in PDF. The PDF might be image-based or corrupted.',
-//         suggestion: 'Try using OCR software to convert the PDF to searchable text first.'
-//       }, { status: 400 });
-//     }
-
-//     // Clean and prepare text
-//     const cleanedText = pdfData.text
-//       .replace(/\s+/g, ' ')
-//       .replace(/\n\s*\n/g, '\n')
-//       .trim();
-
-//     console.log('🧹 Text cleaned, length:', cleanedText.length);
-
-//     // Chunk the text using intelligent chunking
-//     const chunks = chunkText(cleanedText, options.maxChunkSize, options.overlapSize);
-//     console.log('✂️ Text chunked into', chunks.length, 'pieces');
-
-//     let results = {
-//       filename: file.name,
-//       fileSize: file.size,
-//       pages: pdfData.numpages,
-//       textLength: cleanedText.length,
-//       chunks: chunks.length,
-//       processingOptions: options,
-//       chunks_data: []
-//     };
-
-//     // Process and store chunks if requested
-//     if (options.storeInKnowledge && chunks.length > 0) {
-//       console.log('💾 Storing chunks in ChromaDB...');
-      
-//       const embeddings = [];
-//       const metadataList = [];
-//       const ids = [];
-
-//       // Generate embeddings for all chunks
-//       try {
-//         const model = genAI.getGenerativeModel({ model: "gemini-embedding-001" });
+    try {
+      if (useFileAPI) {
+        console.log('📤 Uploading file to Gemini File API...');
         
-//         for (let i = 0; i < chunks.length; i++) {
-//           const chunk = chunks[i];
-          
-//           // Generate embedding
-//           const result = await model.embedContent(chunk);
-//           const embedding = result.embedding;
-          
-//           if (!embedding?.values) {
-//             throw new Error(`Failed to generate embedding for chunk ${i + 1}`);
-//           }
+        const fileBlob = new Blob([buffer], { type: 'application/pdf' });
+        
+        geminiFile = await genAI.files.upload({
+          file: fileBlob,
+          config: {
+            displayName: file.name,
+            mimeType: 'application/pdf'
+          }
+        });
 
-//           // Generate metadata
-//           const metadata = generateMetadata(file.name, i, chunks.length, {
-//             page: Math.floor(i / (chunks.length / pdfData.numpages)) + 1,
-//             totalPages: pdfData.numpages
-//           });
+        console.log('⏳ Waiting for file processing...');
+        
+        let getFile = await genAI.files.get({ name: geminiFile.name });
+        let attempts = 0;
+        const maxAttempts = 12;
+        
+        while (getFile.state === 'PROCESSING' && attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          getFile = await genAI.files.get({ name: geminiFile.name });
+          attempts++;
+          console.log(`⏳ File status: ${getFile.state} (attempt ${attempts}/${maxAttempts})`);
+        }
 
-//           // Create unique ID
-//           const chunkId = `pdf_${Date.now()}_${i}`;
+        if (getFile.state === 'FAILED') {
+          throw new Error('File processing failed on Gemini servers');
+        }
 
-//           embeddings.push(embedding.values);
-//           metadataList.push(metadata);
-//           ids.push(chunkId);
+        if (getFile.state === 'PROCESSING') {
+          throw new Error('File processing timeout - please try again');
+        }
 
-//           results.chunks_data.push({
-//             id: chunkId,
-//             text: chunk.substring(0, 200) + (chunk.length > 200 ? '...' : ''),
-//             length: chunk.length,
-//             metadata: metadata
-//           });
-//         }
+        console.log('✅ File processed successfully');
 
-//         // Store in ChromaDB
-//         const chromaService = await getChromaService();
-//         const addResult = await chromaService.addDocuments(
-//           'knowledge_base',
-//           {
-//             ids: ids,
-//             embeddings: embeddings,
-//             metadatas: metadataList,
-//             documents: chunks
-//           }
-//         );
+        const analysisPrompt = getAnalysisPrompt(options.analysisDepth);
+        
+        const response = await genAI.models.generateContent({
+          model: 'gemini-2.0-flash-exp',
+          contents: [
+            { text: analysisPrompt },
+            { 
+              fileData: {
+                mimeType: geminiFile.mimeType,
+                fileUri: geminiFile.uri
+              }
+            }
+          ]
+        });
 
-//         if (addResult.success) {
-//           console.log('✅ All chunks stored successfully in ChromaDB');
-//           results.storage = {
-//             success: true,
-//             stored_chunks: chunks.length,
-//             collection: 'knowledge_base'
-//           };
-//         } else {
-//           throw new Error(addResult.error || 'Failed to store in ChromaDB');
-//         }
+        analysisResults = parseAnalysisResponse(response.text);
 
-//       } catch (error) {
-//         console.error('❌ Error storing chunks:', error);
-//         results.storage = {
-//           success: false,
-//           error: error.message,
-//           stored_chunks: 0
-//         };
-//       }
-//     } else {
-//       console.log('⏭️ Skipping storage (not requested or no chunks)');
-//       results.storage = {
-//         success: true,
-//         message: 'Storage not requested',
-//         stored_chunks: 0
-//       };
-//     }
+      } else {
+        console.log('📄 Processing PDF with inline data...');
+        
+        const base64Data = buffer.toString('base64');
+        const analysisPrompt = getAnalysisPrompt(options.analysisDepth);
 
-//     console.log('✅ PDF processing completed successfully');
-    
-//     return NextResponse.json({
-//       success: true,
-//       message: `Successfully processed PDF "${file.name}"`,
-//       data: results
-//     });
+        const response = await genAI.models.generateContent({
+          model: 'gemini-2.0-flash-exp',
+          contents: [
+            { text: analysisPrompt },
+            {
+              inlineData: {
+                mimeType: 'application/pdf',
+                data: base64Data
+              }
+            }
+          ]
+        });
 
-//   } catch (error) {
-//     console.error('❌ PDF processing error:', error);
-//     return NextResponse.json({
-//       success: false,
-//       error: 'PDF processing failed',
-//       details: error.message
-//     }, { status: 500 });
-//   }
-// }
+        analysisResults = parseAnalysisResponse(response.text);
+      }
+
+      console.log('🧠 Document analysis completed:', {
+        type: analysisResults.type,
+        category: analysisResults.category,
+        topics: analysisResults.topics?.length || 0,
+        contentLength: analysisResults.extractedText?.length || 0
+      });
+
+      if (geminiFile) {
+        try {
+          await genAI.files.delete({ name: geminiFile.name });
+          console.log('🗑️ Temporary file cleaned up');
+        } catch (cleanupError) {
+          console.warn('⚠️ Could not clean up temporary file:', cleanupError.message);
+        }
+      }
+
+      const processedText = analysisResults.extractedText || '';
+      
+      if (!processedText || processedText.trim().length === 0) {
+        return NextResponse.json({
+          success: false,
+          error: 'No readable text content found in PDF',
+          suggestion: 'The PDF might be image-only or corrupted.'
+        }, { status: 400 });
+      }
+
+      const chunks = chunkText(processedText, options.maxChunkSize, options.overlapSize);
+      console.log('✂️ Text chunked into', chunks.length, 'pieces');
+
+      let results = {
+        filename: file.name,
+        fileSize: file.size,
+        textLength: processedText.length,
+        chunks: chunks.length,
+        processingOptions: options,
+        analysis: {
+          type: analysisResults.type,
+          category: analysisResults.category,
+          topics: analysisResults.topics,
+          summary: analysisResults.summary,
+          entities: analysisResults.entities,
+          keyPhrases: analysisResults.keyPhrases
+        },
+        chunks_data: []
+      };
+
+      if (options.storeInKnowledge && chunks.length > 0) {
+        console.log('💾 Storing document in ChromaDB...');
+        
+        try {
+          const documentId = `pdf_document_${Date.now()}`;
+          const addResult = await chromaService.addKnowledgeEntry({
+            id: documentId,
+            title: `${analysisResults.title || file.name} (Multimodal Analysis)`,
+            content: processedText,
+            category: analysisResults.category || 'document',
+            tags: analysisResults.topics || [],
+            source: 'pdf_gemini_upload',
+            metadata: {
+              filename: file.name,
+              fileSize: file.size,
+              chunks: chunks.length,
+              analysis: analysisResults,
+              processing_method: 'gemini_multimodal',
+              upload_date: new Date().toISOString()
+            }
+          });
+
+          if (addResult.success) {
+            console.log('✅ Document stored successfully in ChromaDB');
+            results.storage = {
+              success: true,
+              stored_chunks: chunks.length,
+              collection: 'knowledge_base',
+              document_id: addResult.id || documentId
+            };
+          } else {
+            throw new Error(addResult.error || 'Failed to store in ChromaDB');
+          }
+
+        } catch (error) {
+          console.error('❌ Error storing document:', error);
+          results.storage = {
+            success: false,
+            error: error.message,
+            stored_chunks: 0
+          };
+        }
+      } else {
+        console.log('⏭️ Skipping storage (not requested)');
+        results.storage = {
+          success: true,
+          message: 'Storage not requested',
+          stored_chunks: 0
+        };
+      }
+
+      console.log('✅ Gemini PDF processing completed successfully');
+      
+      return NextResponse.json({
+        success: true,
+        message: `Successfully processed PDF "${file.name}" using Gemini Multimodal AI`,
+        data: results
+      });
+
+    } catch (geminiError) {
+      console.error('❌ Gemini processing error:', geminiError);
+      
+      if (geminiFile) {
+        try {
+          await genAI.files.delete({ name: geminiFile.name });
+        } catch (cleanupError) {
+          console.warn('Could not clean up file after error:', cleanupError.message);
+        }
+      }
+      
+      return NextResponse.json({
+        success: false,
+        error: 'Gemini document analysis failed',
+        details: geminiError.message
+      }, { status: 500 });
+    }
+
+  } catch (error) {
+    console.error('❌ PDF processing error:', error);
+    return NextResponse.json({
+      success: false,
+      error: 'PDF processing failed',
+      details: error.message
+    }, { status: 500 });
+  }
+}
+
+function getAnalysisPrompt(depth) {
+  const basePrompt = `Analyze this PDF document comprehensively using your multimodal capabilities. Extract and understand:
+
+1. **Document Type & Category**: Identify what type of document this is (academic notice, syllabus, exam schedule, fee structure, etc.)
+
+2. **Content Extraction**: Extract all readable text content, preserving structure and formatting context
+
+3. **Key Information**: Identify important dates, deadlines, contact information, procedures, requirements
+
+4. **Topics & Themes**: List the main topics covered in the document
+
+5. **Entities**: Extract people names, places, departments, courses, amounts, dates
+
+6. **Summary**: Provide a comprehensive summary of the document's contents
+
+Please respond in this JSON format:
+{
+  "type": "document_type_here",
+  "category": "primary_category",
+  "title": "inferred_document_title",
+  "summary": "comprehensive_summary",
+  "topics": ["topic1", "topic2", "topic3"],
+  "entities": ["entity1", "entity2"],
+  "keyPhrases": ["phrase1", "phrase2"],
+  "extractedText": "full_extracted_text_content",
+  "keyInformation": {
+    "dates": [],
+    "deadlines": [],
+    "contacts": [],
+    "procedures": []
+  }
+}`;
+
+  if (depth === 'detailed') {
+    return basePrompt + `
+
+**Additional Requirements for Detailed Analysis**:
+- Analyze any charts, tables, or diagrams present
+- Extract specific numerical data and statistics
+- Identify relationships between different sections
+- Note any visual elements or formatting that adds meaning
+- Provide section-by-section breakdown if applicable`;
+  }
+
+  if (depth === 'summary') {
+    return `Provide a quick analysis of this PDF document. Focus on:
+- Document type and main purpose
+- Key topics and important information
+- Brief summary
+- Extract the main text content
+
+Respond in the same JSON format but with concise information.`;
+  }
+
+  return basePrompt;
+}
+
+function parseAnalysisResponse(responseText) {
+  try {
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        type: parsed.type || 'document',
+        category: parsed.category || 'general',
+        title: parsed.title || 'Untitled Document',
+        summary: parsed.summary || '',
+        topics: parsed.topics || [],
+        entities: parsed.entities || [],
+        keyPhrases: parsed.keyPhrases || [],
+        extractedText: parsed.extractedText || '',
+        keyInformation: parsed.keyInformation || {}
+      };
+    }
+  } catch (parseError) {
+    console.warn('Could not parse JSON response, using fallback parsing');
+  }
+
+  return {
+    type: 'document',
+    category: 'general',
+    title: 'Document Analysis',
+    summary: responseText.substring(0, 500),
+    topics: [],
+    entities: [],
+    keyPhrases: [],
+    extractedText: responseText,
+    keyInformation: {}
+  };
+}

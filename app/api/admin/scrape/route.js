@@ -181,7 +181,7 @@ export async function POST(request) {
             ? `${metadata.title} (Part ${i + 1}/${chunks.length})`
             : metadata.title;
           
-          const success = await chromaDBService.addKnowledgeEntry({
+          const result = await chromaDBService.addKnowledgeEntry({
             id: chunkId,
             title: title,
             content: chunk.text,
@@ -193,7 +193,7 @@ export async function POST(request) {
             metadata: metadata
           });
           
-          if (success) {
+          if (result.success) {
             totalChunks++;
             chunkSuccessCount++;
             console.log(`✅ Added chunk ${i + 1}/${chunks.length} to knowledge base (ID: ${chunkId})`);

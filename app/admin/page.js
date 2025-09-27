@@ -587,10 +587,11 @@ function KnowledgeBaseTab({ entries, loading, onRefresh }) {
 
       {/* Edit Modal */}
       {showEditModal && selectedEntry && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-3xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-start mb-6">
-              <h3 className="text-lg font-medium text-gray-900">
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 backdrop-blur-sm">
+          <div className="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-2xl border border-gray-200 p-8 max-w-3xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-start mb-8">
+              <h3 className="text-2xl font-semibold text-gray-800 flex items-center gap-2">
+                <Edit3 className="w-6 h-6 text-blue-600" />
                 Edit Knowledge Entry
               </h3>
               <button
@@ -598,7 +599,7 @@ function KnowledgeBaseTab({ entries, loading, onRefresh }) {
                   setShowEditModal(false);
                   setSelectedEntry(null);
                 }}
-                className="text-gray-400 hover:text-gray-600"
+                className="text-gray-400 hover:text-red-500 transition-colors duration-200 p-1 rounded-full hover:bg-gray-100"
               >
                 <X className="w-6 h-6" />
               </button>
@@ -617,8 +618,8 @@ function KnowledgeBaseTab({ entries, loading, onRefresh }) {
                   <input
                     type="text"
                     defaultValue={selectedEntry.title}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Enter title"
+                    className="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white text-gray-900"
+                    placeholder="Enter a descriptive title..."
                   />
                 </div>
                 
@@ -629,12 +630,12 @@ function KnowledgeBaseTab({ entries, loading, onRefresh }) {
                   <textarea
                     defaultValue={selectedEntry.content}
                     rows="10"
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Enter content"
+                    className="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white text-gray-900 resize-vertical"
+                    placeholder="Enter the detailed content..."
                   />
                 </div>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Category
@@ -642,8 +643,8 @@ function KnowledgeBaseTab({ entries, loading, onRefresh }) {
                     <input
                       type="text"
                       defaultValue={selectedEntry.category}
-                      className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Enter category"
+                      className="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white text-gray-900"
+                      placeholder="e.g., Academic, General, etc."
                     />
                   </div>
                   
@@ -658,28 +659,30 @@ function KnowledgeBaseTab({ entries, loading, onRefresh }) {
                           ? selectedEntry.tags.join(', ')
                           : selectedEntry.tags
                       }
-                      className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Enter tags separated by commas"
+                      className="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white text-gray-900"
+                      placeholder="tag1, tag2, tag3..."
                     />
                   </div>
                 </div>
               </div>
               
-              <div className="flex justify-end mt-8 space-x-3">
+              <div className="flex justify-end mt-10 gap-4">
                 <button
                   type="button"
                   onClick={() => {
                     setShowEditModal(false);
                     setSelectedEntry(null);
                   }}
-                  className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
+                  className="px-6 py-3 text-gray-600 bg-gray-100 border-2 border-gray-200 rounded-xl hover:bg-gray-200 hover:border-gray-300 transition-all duration-200 font-medium flex items-center gap-2"
                 >
+                  <X className="w-4 h-4" />
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all duration-200 font-medium shadow-lg hover:shadow-xl flex items-center gap-2"
                 >
+                  <Edit3 className="w-4 h-4" />
                   Save Changes
                 </button>
               </div>
@@ -920,12 +923,197 @@ function ManualEntryForm({ onSuccess }) {
 
 // File Upload Form
 function FileUploadForm({ onSuccess }) {
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [uploadResults, setUploadResults] = useState([]);
+
+  const handleFileSelect = (files) => {
+    const validFiles = Array.from(files).filter(file => {
+      const validTypes = ['text/plain', 'application/json'];
+      const validExtensions = ['.txt', '.md', '.json'];
+      return validTypes.includes(file.type) || validExtensions.some(ext => file.name.endsWith(ext));
+    });
+    
+    if (validFiles.length !== files.length) {
+      alert('Some files were filtered out. Only .txt, .md, and .json files are supported.');
+    }
+    
+    setSelectedFiles(validFiles);
+    setUploadResults([]);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    handleFileSelect(e.dataTransfer.files);
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setDragOver(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+  };
+
+  const uploadFiles = async () => {
+    if (selectedFiles.length === 0) {
+      alert('Please select files first');
+      return;
+    }
+
+    setLoading(true);
+    setUploadResults([]);
+
+    try {
+      const formData = new FormData();
+      selectedFiles.forEach(file => {
+        formData.append('files', file);
+      });
+      formData.append('category', 'documents');
+      formData.append('source', 'file_upload');
+
+      const response = await fetch('/api/admin/upload', {
+        method: 'POST',
+        body: formData
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        setUploadResults(result.results);
+        const successCount = result.results.filter(r => r.success).length;
+        alert(`✅ Successfully uploaded ${successCount} of ${selectedFiles.length} files!`);
+        onSuccess(); // Refresh the knowledge base
+        setSelectedFiles([]); // Clear files on success
+      } else {
+        alert(`❌ Upload failed: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Upload error:', error);
+      alert(`❌ Upload failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const clearFiles = () => {
+    setSelectedFiles([]);
+    setUploadResults([]);
+  };
+
   return (
-    <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center bg-gray-50">
-      <Upload className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-      <p className="text-gray-900 font-medium">Drag and drop files here, or click to browse</p>
-      <p className="text-sm text-gray-700 mt-2">Supports: .txt, .md, .json</p>
-      <input type="file" className="hidden" multiple accept=".txt,.md,.json" />
+    <div className="space-y-6">
+      {/* Upload Area */}
+      <div 
+        className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+          dragOver 
+            ? 'border-blue-500 bg-blue-50' 
+            : 'border-gray-300 bg-gray-50 hover:border-gray-400'
+        }`}
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onClick={() => document.getElementById('file-upload').click()}
+      >
+        <Upload className={`w-12 h-12 mx-auto mb-4 ${dragOver ? 'text-blue-600' : 'text-gray-600'}`} />
+        <p className="text-gray-900 font-medium">
+          {dragOver ? 'Drop files here' : 'Drag and drop files here, or click to browse'}
+        </p>
+        <p className="text-sm text-gray-700 mt-2">Supports: .txt, .md, .json files</p>
+        <input 
+          id="file-upload"
+          type="file" 
+          className="hidden" 
+          multiple 
+          accept=".txt,.md,.json,text/plain,application/json"
+          onChange={(e) => handleFileSelect(e.target.files)}
+        />
+      </div>
+
+      {/* Selected Files */}
+      {selectedFiles.length > 0 && (
+        <div className="bg-white border rounded-lg p-4">
+          <div className="flex justify-between items-center mb-3">
+            <h4 className="font-medium text-gray-900">Selected Files ({selectedFiles.length})</h4>
+            <button 
+              onClick={clearFiles}
+              className="text-sm text-gray-500 hover:text-red-600"
+            >
+              Clear All
+            </button>
+          </div>
+          
+          <div className="space-y-2 max-h-40 overflow-y-auto">
+            {selectedFiles.map((file, index) => (
+              <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                <div>
+                  <span className="text-sm font-medium">{file.name}</span>
+                  <span className="text-xs text-gray-500 ml-2">
+                    ({(file.size / 1024).toFixed(1)} KB)
+                  </span>
+                </div>
+                <button
+                  onClick={() => {
+                    const newFiles = selectedFiles.filter((_, i) => i !== index);
+                    setSelectedFiles(newFiles);
+                  }}
+                  className="text-red-500 hover:text-red-700 p-1"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex gap-3 mt-4">
+            <button
+              onClick={uploadFiles}
+              disabled={loading}
+              className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <Upload className="w-4 h-4" />
+                  Upload Files
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Upload Results */}
+      {uploadResults.length > 0 && (
+        <div className="bg-white border rounded-lg p-4">
+          <h4 className="font-medium text-gray-900 mb-3">Upload Results</h4>
+          <div className="space-y-2 max-h-60 overflow-y-auto">
+            {uploadResults.map((result, index) => (
+              <div key={index} className={`p-2 rounded flex items-center gap-2 ${
+                result.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'
+              }`}>
+                {result.success ? (
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                ) : (
+                  <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                )}
+                <span className="text-sm">
+                  {result.file}: {result.entry} 
+                  {result.success ? ' ✅' : ` ❌ ${result.error || 'Failed'}`}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

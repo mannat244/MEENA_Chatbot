@@ -50,7 +50,7 @@ export async function POST(request) {
                 if (entry.title && entry.content) {
                   const entryId = entry.id || `json_${Date.now()}_${index}`;
                   
-                  const success = await chromaDBService.addKnowledgeEntry({
+                  const result = await chromaDBService.addKnowledgeEntry({
                     id: entryId,
                     title: entry.title,
                     content: entry.content,
@@ -64,7 +64,8 @@ export async function POST(request) {
                   results.push({
                     file: fileName,
                     entry: entry.title,
-                    success,
+                    success: result.success,
+                    error: result.error,
                     type: 'json_array_entry'
                   });
                 }
@@ -107,7 +108,7 @@ export async function POST(request) {
               const chunkId = `${entryId}_chunk_${chunkIndex}`;
               const chunkTitle = `${title} (Part ${chunkIndex + 1}/${chunks.length})`;
               
-              const success = await chromaDBService.addKnowledgeEntry({
+              const result = await chromaDBService.addKnowledgeEntry({
                 id: chunkId,
                 title: chunkTitle,
                 content: chunk,
@@ -121,14 +122,15 @@ export async function POST(request) {
               results.push({
                 file: fileName,
                 entry: chunkTitle,
-                success,
+                success: result.success,
+                error: result.error,
                 type: 'chunk',
                 size: chunk.length
               });
             }
           } else {
             // Single entry
-            const success = await chromaDBService.addKnowledgeEntry({
+            const result = await chromaDBService.addKnowledgeEntry({
               id: entryId,
               title,
               content,
@@ -142,7 +144,8 @@ export async function POST(request) {
             results.push({
               file: fileName,
               entry: title,
-              success,
+              success: result.success,
+              error: result.error,
               type: 'single',
               size: content.length
             });

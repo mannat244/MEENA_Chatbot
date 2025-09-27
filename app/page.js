@@ -835,13 +835,13 @@ Please answer my question using the relevant information provided above. Be spec
           console.log('✅ Streaming completed, response length:', fullResponse.length);
           console.log('🧹 Cleaned response length:', cleanedResponse.length);
           
-          // Check if response indicates lack of knowledge - trigger human fallback
-          const shouldTriggerFallback = checkForHumanFallback(fullResponse, currentInput);
-          if (shouldTriggerFallback) {
-            setTimeout(() => {
-              showHumanFallbackDialog(currentInput, cleanedResponse);
-            }, 1000);
-          }
+          // Auto-trigger disabled - users can manually request help using the help button
+          // const shouldTriggerFallback = checkForHumanFallback(fullResponse, currentInput);
+          // if (shouldTriggerFallback) {
+          //   setTimeout(() => {
+          //     showHumanFallbackDialog(currentInput, cleanedResponse);
+          //   }, 1000);
+          // }
           
           // Store MEENA's response in ChromaDB
           if (fullResponse.trim()) {

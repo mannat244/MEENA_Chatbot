@@ -68,11 +68,11 @@ export async function POST(request) {
           }, { status: 400 });
         }
         
-        const addSuccess = await chromaService.addKnowledgeEntry(data);
+        const result = await chromaService.addKnowledgeEntry(data);
         
         return NextResponse.json({
-          success: addSuccess,
-          message: addSuccess ? 'Knowledge entry added successfully' : 'Failed to add knowledge entry'
+          success: result.success,
+          message: result.success ? 'Knowledge entry added successfully' : result.error || 'Failed to add knowledge entry'
         });
         
       case 'search':
@@ -113,12 +113,12 @@ export async function POST(request) {
         
         for (const entry of data) {
           try {
-            const success = await chromaService.addKnowledgeEntry(entry);
-            if (success) {
+            const result = await chromaService.addKnowledgeEntry(entry);
+            if (result.success) {
               successCount++;
             } else {
               errorCount++;
-              errors.push(`Failed to add: ${entry.title || entry.id}`);
+              errors.push(`Failed to add: ${entry.title || entry.id} - ${result.error}`);
             }
           } catch (error) {
             errorCount++;

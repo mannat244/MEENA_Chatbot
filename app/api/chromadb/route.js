@@ -23,7 +23,7 @@ export async function POST(request) {
           );
         }
         
-        const success = await chromaDBService.addKnowledgeEntry({
+        const result = await chromaDBService.addKnowledgeEntry({
           id,
           title,
           content,
@@ -33,8 +33,8 @@ export async function POST(request) {
         });
         
         return NextResponse.json({
-          success,
-          message: success ? 'Knowledge entry added successfully' : 'Failed to add knowledge entry'
+          success: result.success,
+          message: result.success ? 'Knowledge entry added successfully' : result.error || 'Failed to add knowledge entry'
         });
         
       case 'search_knowledge':

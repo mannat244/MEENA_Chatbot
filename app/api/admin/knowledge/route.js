@@ -58,7 +58,7 @@ export async function POST(request) {
       );
     }
     
-    const success = await chromaDBService.addKnowledgeEntry({
+    const result = await chromaDBService.addKnowledgeEntry({
       id,
       title,
       content,
@@ -71,8 +71,8 @@ export async function POST(request) {
     });
     
     return NextResponse.json({
-      success,
-      message: success ? 'Knowledge entry added successfully' : 'Failed to add knowledge entry'
+      success: result.success,
+      message: result.success ? 'Knowledge entry added successfully' : result.error || 'Failed to add knowledge entry'
     });
     
   } catch (error) {
@@ -103,7 +103,7 @@ export async function PUT(request) {
     // Delete the existing entry and add updated one
     await chromaDBService.collections.knowledgeBase.delete({ ids: [id] });
     
-    const success = await chromaDBService.addKnowledgeEntry({
+    const result = await chromaDBService.addKnowledgeEntry({
       id,
       title,
       content,
@@ -116,8 +116,8 @@ export async function PUT(request) {
     });
     
     return NextResponse.json({
-      success,
-      message: success ? 'Knowledge entry updated successfully' : 'Failed to update knowledge entry'
+      success: result.success,
+      message: result.success ? 'Knowledge entry updated successfully' : result.error || 'Failed to update knowledge entry'
     });
     
   } catch (error) {
