@@ -346,6 +346,8 @@ function KnowledgeBaseTab({ entries, loading, onRefresh }) {
   const [showViewModal, setShowViewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [updateLoading, setUpdateLoading] = useState(false);
+  const [message, setMessage] = useState('');
 
   // Delete entry function
   const handleDelete = async (entry) => {
@@ -605,10 +607,59 @@ function KnowledgeBaseTab({ entries, loading, onRefresh }) {
               </button>
             </div>
             
-            <form onSubmit={(e) => {
+            {/* Message Display */}
+            {message && (
+              <div className={`mb-6 p-4 rounded-lg border ${
+                message.includes('successfully') 
+                  ? 'bg-green-50 border-green-200 text-green-800' 
+                  : 'bg-red-50 border-red-200 text-red-800'
+              }`}>
+                {message}
+              </div>
+            )}
+            
+            <form onSubmit={async (e) => {
               e.preventDefault();
-              // TODO: Implement update functionality
-              alert('Update functionality will be implemented next');
+              
+              // Get form data
+              const formData = new FormData(e.target);
+              const updatedEntry = {
+                id: selectedEntry.id,
+                title: formData.get('title'),
+                content: formData.get('content'),
+                category: formData.get('category'),
+                tags: formData.get('tags')
+              };
+              
+              try {
+                setUpdateLoading(true);
+                setMessage('');
+                
+                const response = await fetch('/api/admin/knowledge', {
+                  method: 'PUT',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify(updatedEntry)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                  setMessage('Knowledge entry updated successfully!');
+                  setShowEditModal(false);
+                  setSelectedEntry(null);
+                  // Refresh the knowledge base
+                  await onRefresh();
+                } else {
+                  setMessage(`Failed to update entry: ${result.message || 'Unknown error'}`);
+                }
+              } catch (error) {
+                console.error('Error updating knowledge entry:', error);
+                setMessage(`Error updating entry: ${error.message}`);
+              } finally {
+                setUpdateLoading(false);
+              }
             }}>
               <div className="space-y-6">
                 <div>
@@ -617,9 +668,11 @@ function KnowledgeBaseTab({ entries, loading, onRefresh }) {
                   </label>
                   <input
                     type="text"
+                    name="title"
                     defaultValue={selectedEntry.title}
                     className="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white text-gray-900"
                     placeholder="Enter a descriptive title..."
+                    required
                   />
                 </div>
                 
@@ -628,10 +681,12 @@ function KnowledgeBaseTab({ entries, loading, onRefresh }) {
                     Content
                   </label>
                   <textarea
+                    name="content"
                     defaultValue={selectedEntry.content}
                     rows="10"
                     className="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white text-gray-900 resize-vertical"
                     placeholder="Enter the detailed content..."
+                    required
                   />
                 </div>
                 
@@ -642,6 +697,7 @@ function KnowledgeBaseTab({ entries, loading, onRefresh }) {
                     </label>
                     <input
                       type="text"
+                      name="category"
                       defaultValue={selectedEntry.category}
                       className="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white text-gray-900"
                       placeholder="e.g., Academic, General, etc."
@@ -654,6 +710,7 @@ function KnowledgeBaseTab({ entries, loading, onRefresh }) {
                     </label>
                     <input
                       type="text"
+                      name="tags"
                       defaultValue={
                         Array.isArray(selectedEntry.tags) 
                           ? selectedEntry.tags.join(', ')
@@ -680,10 +737,20 @@ function KnowledgeBaseTab({ entries, loading, onRefresh }) {
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all duration-200 font-medium shadow-lg hover:shadow-xl flex items-center gap-2"
+                  disabled={updateLoading}
+                  className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all duration-200 font-medium shadow-lg hover:shadow-xl flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Edit3 className="w-4 h-4" />
-                  Save Changes
+                  {updateLoading ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Updating...
+                    </>
+                  ) : (
+                    <>
+                      <Edit3 className="w-4 h-4" />
+                      Save Changes
+                    </>
+                  )}
                 </button>
               </div>
             </form>

@@ -905,13 +905,19 @@ Please answer my question using the relevant information provided above. Be spec
                   if (data.content) {
                     fullResponse += data.content;
                     
-                    // Clean trigger code from display during streaming
+                    // Check for fallback trigger and clean from display during streaming
+                    const hasFallbackTrigger = fullResponse.includes('HUMAN_FALLBACK_TRIGGER_7439');
                     const displayResponse = fullResponse.replace(/HUMAN_FALLBACK_TRIGGER_7439/g, '').trim();
+                    
+                    // Debug logging for fallback trigger
+                    if (hasFallbackTrigger) {
+                      console.log('🔔 Fallback trigger detected during streaming, flag set to:', hasFallbackTrigger);
+                    }
                     
                     // Update the message with streaming content
                     setMessages(prev => prev.map(msg => 
                       msg.id === meenaMessageId 
-                        ? { ...msg, text: displayResponse, isStreaming: true }
+                        ? { ...msg, text: displayResponse, isStreaming: true, hasFallbackTrigger }
                         : msg
                     ));
                   } else if (data.done) {
@@ -926,13 +932,22 @@ Please answer my question using the relevant information provided above. Be spec
             }
           }
           
-          // Clean the response by removing trigger code before displaying
+          // Check for fallback trigger and clean the response before displaying
+          const hasFallbackTrigger = fullResponse.includes('HUMAN_FALLBACK_TRIGGER_7439');
           const cleanedResponse = fullResponse.replace(/HUMAN_FALLBACK_TRIGGER_7439/g, '').trim();
+          
+          // Debug logging for final fallback trigger
+          console.log('🔔 Final response analysis:', {
+            fullResponseLength: fullResponse.length,
+            hasFallbackTrigger,
+            cleanedResponseLength: cleanedResponse.length,
+            triggerFound: fullResponse.includes('HUMAN_FALLBACK_TRIGGER_7439')
+          });
           
           // Mark streaming as complete - ensure this always happens
           setMessages(prev => prev.map(msg => 
             msg.id === meenaMessageId 
-              ? { ...msg, text: cleanedResponse, isStreaming: false, hasAttachment: Math.random() > 0.8 }
+              ? { ...msg, text: cleanedResponse, isStreaming: false, hasAttachment: Math.random() > 0.8, hasFallbackTrigger }
               : msg
           ));
           
@@ -990,7 +1005,8 @@ Please answer my question using the relevant information provided above. Be spec
                 ...msg, 
                 text: msg.text || 'Sorry, I encountered an error while processing your request. Please try again later or contact support if the issue persists.',
                 isStreaming: false,
-                isError: true
+                isError: true,
+                hasFallbackTrigger: true // Error cases should allow human fallback
               }
             : msg
         ));
@@ -1006,7 +1022,8 @@ Please answer my question using the relevant information provided above. Be spec
                   ...msg, 
                   text: msg.text || 'Response incomplete. Please try again.',
                   isStreaming: false,
-                  isError: true
+                  isError: true,
+                  hasFallbackTrigger: true // Incomplete responses should allow human fallback
                 }
               : msg
           ));
@@ -1532,14 +1549,55 @@ Please answer my question using the relevant information provided above. Be spec
                           className="text-sm"
                         />
                       </div>
-                      <button
-                        onClick={() => handleTTS(message.text)}
-                        disabled={isTTSLoading}
-                        className="flex-shrink-0 p-1 rounded hover:bg-gray-200 transition-colors"
-                        title="Listen to response"
-                      >
-                        <Volume2 size={14} className={isTTSLoading ? 'text-gray-400' : 'text-gray-600'} />
-                      </button>
+                      <div className="flex-shrink-0 flex items-center space-x-1">
+                        {message.hasFallbackTrigger && (
+                          <button
+                            onClick={() => {
+                              console.log('🆘 Fallback button clicked for message:', message);
+                              const lastUserMessage = messages.filter(m => m.sender === 'user').pop();
+                              showHumanFallbackDialog(
+                                lastUserMessage?.text || 'General inquiry',
+                                message.text
+                              );
+                            }}
+                            className="p-1 rounded-full bg-orange-500 hover:bg-orange-600 text-white transition-colors"
+                            title="Contact Human Support"
+                          >
+                            <HelpCircle size={14} />
+                          </button>
+                        )}
+                        {/* Debug: Show fallback trigger status */}
+                        {console.log('🔍 Message render debug:', {
+                          messageId: message.id,
+                          hasFallbackTrigger: message.hasFallbackTrigger,
+                          text: message.text?.substring(0, 100) + '...'
+                        })}
+                        {/* Temporary: Always show fallback for testing */}
+                        {message.sender === 'meena' && !message.isStreaming && !message.hasFallbackTrigger && (
+                          <button
+                            onClick={() => {
+                              console.log('🧪 Test fallback button clicked (no trigger detected)');
+                              const lastUserMessage = messages.filter(m => m.sender === 'user').pop();
+                              showHumanFallbackDialog(
+                                lastUserMessage?.text || 'General inquiry',
+                                message.text
+                              );
+                            }}
+                            className="p-1 rounded-full bg-gray-400 hover:bg-gray-500 text-white transition-colors opacity-50"
+                            title="Test Fallback (No Trigger Detected)"
+                          >
+                            <HelpCircle size={14} />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleTTS(message.text)}
+                          disabled={isTTSLoading}
+                          className="p-1 rounded hover:bg-gray-200 transition-colors"
+                          title="Listen to response"
+                        >
+                          <Volume2 size={14} className={isTTSLoading ? 'text-gray-400' : 'text-gray-600'} />
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1997,6 +2055,33 @@ Please answer my question using the relevant information provided above. Be spec
                           </button>
                         </div>
                       )}
+                      {message.hasFallbackTrigger && !message.isStreaming && (
+                        <div className="flex items-center justify-between mt-2">
+                          <span className="text-xs text-gray-600">Need more help?</span>
+                          <button
+                            onClick={() => {
+                              console.log('🆘 Widget fallback button clicked for message:', message);
+                              const lastUserMessage = messages.filter(m => m.sender === 'user').pop();
+                              showHumanFallbackDialog(
+                                lastUserMessage?.text || 'General inquiry',
+                                message.text
+                              );
+                            }}
+                            className="flex items-center space-x-1 px-2 py-1 text-xs bg-orange-500 hover:bg-orange-600 text-white rounded transition-colors"
+                            title="Contact Human Support"
+                          >
+                            <HelpCircle size={12} />
+                            <span>Contact Human</span>
+                          </button>
+                        </div>
+                      )}
+                      {/* Debug: Widget fallback trigger status */}
+                      {console.log('🔍 Widget message render debug:', {
+                        messageId: message.id,
+                        hasFallbackTrigger: message.hasFallbackTrigger,
+                        isStreaming: message.isStreaming,
+                        text: message.text?.substring(0, 100) + '...'
+                      })}
                       {message.sender === 'meena' && !message.isStreaming && !message.isError && (
                         <div className="flex items-center space-x-2 mt-2">
                           <button 

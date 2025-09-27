@@ -98,7 +98,7 @@ const InteractiveMap = memo(({ coordinates, title, description }) => {
       // Ensure map tiles load properly - single call, no repeated invalidation
       setTimeout(() => {
         if (mapInstanceRef.current) {
-          map.invalidateSize();
+          mapInstanceRef.current.invalidateSize();
         }
       }, 150);
       
