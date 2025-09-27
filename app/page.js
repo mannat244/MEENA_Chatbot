@@ -142,47 +142,21 @@ export default function Home() {
     }
   }, [selectedModel]);
 
-  // Helper function to check if response indicates lack of knowledge
+  // Helper function to check if response indicates lack of knowledge (REDUCED SENSITIVITY)
   const checkForHumanFallback = (response, query) => {
-    const lowKnowledgeIndicators = [
+    // Only very explicit indicators for automatic triggering
+    const criticalKnowledgeIndicators = [
       "i don't know",
-      "i'm not sure",
-      "i don't have information",
       "i cannot provide",
-      "i'm unable to",
-      "i don't have enough information",
-      "i'm not aware",
-      "i cannot find",
       "no information available",
       "not in my knowledge",
-      "unable to provide",
-      "i don't have details",
-      "sorry, i don't know",
-      "i'm not familiar",
-      "no specific information",
-      "cannot determine",
-      "insufficient information",
-      "does not mention",
-      "no mention of",
-      "not mentioned",
-      "no reference to",
-      "there is no mention",
-      "information does not include",
-      "knowledge base does not contain",
-      "not found in the information",
-      "no details available about",
-      "information provided does not",
-      "no specific details about",
-      "not covered in the available",
-      "recommend contacting",
-      "contact the department",
-      "reach out to"
+      "sorry, i don't know"
     ];
 
     // User explicitly asking for human support
     const humanRequestPatterns = [
       "connect me to human",
-      "talk to human",
+      "talk to human", 
       "speak to human",
       "human support",
       "human assistance",
@@ -197,7 +171,6 @@ export default function Home() {
       "talk to someone",
       "connect to staff",
       "human help",
-      "manual support",
       "contact staff",
       "reach human",
       "get human help",
@@ -239,22 +212,11 @@ export default function Home() {
       return true;
     }
     
-    // Check for direct knowledge gap indicators in AI response
-    const hasKnowledgeGap = lowKnowledgeIndicators.some(indicator => responseText.includes(indicator));
+    // Only check for very clear knowledge gaps (reduced from before)
+    const hasKnowledgeGap = criticalKnowledgeIndicators.some(indicator => responseText.includes(indicator));
     
-    // Check for pattern where AI suggests contacting someone (indicates knowledge gap)
-    const suggestsContact = responseText.includes("recommend contacting") || 
-                           responseText.includes("contact the") || 
-                           responseText.includes("reach them via") ||
-                           responseText.includes("you can reach") ||
-                           (responseText.includes("email:") && responseText.includes("phone:"));
-    
-    // Check if response is deflecting to external sources
-    const isDeflecting = responseText.includes("for the most accurate") ||
-                        responseText.includes("for updated information") ||
-                        responseText.includes("contact") && responseText.includes("directly");
-    
-    return hasKnowledgeGap || (suggestsContact && isDeflecting);
+    // Only trigger on very explicit "I don't know" responses
+    return hasKnowledgeGap;
   };
 
   // Function to show human fallback dialog
@@ -2072,6 +2034,20 @@ Please answer my question using the relevant information provided above. Be spec
               ) : (
                 <Send size={20} />
               )}
+            </button>
+            <button
+              onClick={() => {
+                const lastUserMessage = messages.filter(m => m.sender === 'user').pop();
+                const lastMeenaMessage = messages.filter(m => m.sender === 'meena').pop();
+                showHumanFallbackDialog(
+                  lastUserMessage?.text || 'General inquiry',
+                  lastMeenaMessage?.text || 'User requested human assistance'
+                );
+              }}
+              className="p-3 bg-orange-500 hover:bg-orange-600 text-white rounded-lg transition-colors"
+              title="Get Human Help"
+            >
+              <HelpCircle size={20} />
             </button>
           </div>
         </div>
