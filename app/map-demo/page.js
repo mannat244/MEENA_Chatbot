@@ -96,9 +96,9 @@ export default function MapDemo() {
           <div className="mt-8 p-4 bg-blue-50 rounded-lg">
             <h3 className="font-semibold text-blue-800 mb-2">How to use in chat:</h3>
             <div className="text-sm text-blue-700 space-y-1">
-              <p>• Ask: "Where is NTB?" or "Location of New Technology Block"</p>
-              <p>• Ask: "How to reach the library?" or "Where is the main gate?"</p>
-              <p>• Ask: "Show me H10 block location" or "Directions to sports complex"</p>
+              <p>• Ask: &ldquo;Where is NTB?&rdquo; or &ldquo;Location of New Technology Block&rdquo;</p>
+              <p>• Ask: &ldquo;How to reach the library?&rdquo; or &ldquo;Where is the main gate?&rdquo;</p>
+              <p>• Ask: &ldquo;Show me H10 block location&rdquo; or &ldquo;Directions to sports complex&rdquo;</p>
             </div>
           </div>
 

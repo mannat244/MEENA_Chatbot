@@ -129,7 +129,7 @@ const InteractiveMap = memo(({ coordinates, title, description }) => {
         setIsLoaded(false);
       }
     };
-  }, []); // Remove coordinates dependency to prevent re-initialization
+  }, [initializeMap]); // Include initializeMap dependency
 
   if (error) {
     return (
