@@ -1537,7 +1537,7 @@ Please answer my question using the relevant information provided above. Be spec
                 <div className={`px-3 py-2 text-sm min-w-0 flex-1 ${
                   message.sender === 'user' 
                     ? 'rounded-lg bg-blue-600 text-white' 
-                    : 'rounded-full bg-gray-100 text-gray-800'
+                    : 'rounded-md bg-gray-100 text-black'
                 }`}>
                   {message.sender === 'user' ? (
                     <div className="break-words overflow-wrap-anywhere">{message.text}</div>
@@ -1633,7 +1633,7 @@ Please answer my question using the relevant information provided above. Be spec
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
               placeholder="Ask me anything..."
-              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm text-black placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
               disabled={isLoading}
             />
             <button
