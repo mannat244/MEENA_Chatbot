@@ -1973,7 +1973,7 @@ Please answer my question using the relevant information provided above. Be spec
                 </h1>
                 
                 <p className="text-sm md:text-lg lg:text-xl text-gray-600 mb-2 font-medium text-center">
-                  Multilingual Educational Natural Language Assistant
+                  Multilingual Embeddable Educational Natural Language Assistant
                 </p>
                 
                 {/* Animated Greeting */}
