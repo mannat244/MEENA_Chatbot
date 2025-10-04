@@ -7,9 +7,45 @@ This is a simplified iframe-based widget that allows any website to embed the fu
 ✅ **Simple Integration** - Just one `<script>` tag  
 ✅ **Secure** - Runs in isolated iframe  
 ✅ **Full Functionality** - Complete MEENA chat experience  
+✅ **Live Notices** - Real-time MANIT notices and announcements  
+✅ **Interactive Maps** - Embedded campus location maps  
 ✅ **Customizable** - Size, position, and appearance options  
 ✅ **Mobile Friendly** - Responsive design  
 ✅ **Zero Dependencies** - Self-contained JavaScript  
+
+## New Features
+
+### 🔥 Live Notices & Announcements
+MEENA now fetches live notices directly from the official MANIT website! Simply ask:
+
+**Examples:**
+- "Show me latest notices"
+- "Any new announcements?"
+- "What are the recent exam notices?"
+- "Tell me about placement updates"
+- "Any scholarship information?"
+
+**Features:**
+- 📡 **Live Data**: Fetches from https://www.manit.ac.in/rss.xml
+- ⚡ **Real-time**: Always up-to-date information
+- 🔍 **Smart Filtering**: Categorizes by type (exams, admissions, placements, events)
+- 💫 **Shimmer Loading**: Beautiful loading animation while fetching
+- 📱 **Mobile Optimized**: Works perfectly on all devices
+
+### 🗺️ Interactive Campus Maps
+Ask for any location on campus and get an interactive map:
+
+**Examples:**
+- "Where is NTB?"
+- "Show me hostel locations"
+- "How to reach the library?"
+- "Location of H10 block"
+
+**Features:**
+- 🎯 **Precise Locations**: 149+ campus locations in database
+- 🗺️ **Interactive Maps**: Click to open in Google Maps
+- 📱 **Mobile Responsive**: Perfect for navigation
+- ⚡ **Instant Loading**: Fast map rendering  
 
 ## Quick Start
 

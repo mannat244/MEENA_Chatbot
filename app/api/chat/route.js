@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import dbConnect from '../../../lib/mongodb.js';
 import Chat from '../../../models/Chat.js';
 import { findLocationInQuery, generateMapResponse, CAMPUS_LOCATIONS } from '../../../lib/mapUtils.js';
+import { processURLsInMessage } from '../../../lib/urlUtils.js';
 
 // Initialize Groq client
 const groq = new Groq({
@@ -111,6 +112,52 @@ export async function POST(request) {
       }
     }
 
+    // APPROACH 1: High-confidence regex detection (pre-LLM fetch)
+    const highConfidenceQuery = detectHighConfidenceQuery(originalMessage || message);
+    if (highConfidenceQuery) {
+      return await handleHighConfidenceQuery(highConfidenceQuery, message, language, conversationHistory);
+    }
+
+    // APPROACH 2: URL Detection with progress indication
+    console.log('🔗 Checking for URLs in message...');
+    const urlProcessingResult = await processURLsInMessage(originalMessage || message);
+    
+    let urlContext = '';
+    let showingURLProgress = false;
+    
+    if (urlProcessingResult.hasURLs) {
+      console.log(`🌐 Found ${urlProcessingResult.processedURLs} URLs in message`);
+      showingURLProgress = true;
+      
+      if (urlProcessingResult.urlContent) {
+        urlContext = `\n\n==== CONTENT FROM URLs ====\n${urlProcessingResult.urlContent}\n==== END URL CONTENT ====\n\n`;
+        console.log('✅ URL content fetched and added to context');
+        console.log('📋 ===== EXTRACTED URL CONTENT DETAILS =====');
+        if (urlProcessingResult.urlData) {
+          urlProcessingResult.urlData.forEach((urlInfo, index) => {
+            if (urlInfo.success) {
+              console.log(`\n🌐 URL ${index + 1}: ${urlInfo.url}`);
+              console.log(`📄 Title: ${urlInfo.title || 'No title'}`);
+              console.log(`📝 Description: ${urlInfo.description || 'No description'}`);
+              console.log(`📊 Content Length: ${urlInfo.content?.length || 0} characters`);
+              console.log(`🎯 Page Type Info: ${urlInfo.pageTypeInfo || 'None'}`);
+              console.log(`� Extraction Method: ${urlInfo.extractionMethod || 'Standard'}`);
+              console.log(`📖 Readability Check: ${urlInfo.isReadable ? 'PASSED' : 'FAILED'}`);
+              console.log(`�🔍 Content Preview (first 300 chars): ${(urlInfo.content || '').substring(0, 300)}...`);
+            } else {
+              console.log(`\n❌ URL ${index + 1}: ${urlInfo.url} - Failed: ${urlInfo.error}`);
+            }
+          });
+        }
+        console.log('\n📋 ===== END URL CONTENT DETAILS =====');
+      } else {
+        console.log('❌ Failed to fetch URL content');
+      }
+    }
+
+    // Prepare final message with URL context if available
+    const finalMessage = urlContext ? message + urlContext : message;
+
     // Language instruction based on selected language
     const languageInstruction = language !== 'English' 
       ? `Please respond in ${language}. ` 
@@ -169,12 +216,41 @@ This will automatically connect them to human support while showing your respons
 - Emergency or urgent situations
 - When user explicitly asks for human contact
 
-${hasContext ? `CONTEXT-BASED RESPONSE MODE:
+📢 DYNAMIC CONTENT FETCHING:
+When users ask about current information that needs to be fetched from MANIT website, use these special codes:
+
+NOTICE_FETCH_7439 - Use when users ask about:
+- Latest notices, announcements, updates
+- "Any updates regarding...", "Recent announcements", "Current notices"
+- Exam schedules, academic calendar updates
+- Administrative announcements
+- Placement updates, recruitment notices
+
+SCHOLARSHIP_FETCH_7439 - Use when users ask about:
+- Scholarship information, financial aid
+- "Scholarship details", "Available scholarships"
+- Fee concessions, financial assistance
+- Merit scholarships, need-based aid
+
+URL_FETCH_7439{"url": "complete_url_here"} - Use when users provide a specific URL and ask you to read/analyze it:
+- "Check this link: https://example.com"
+- "What does this page say: URL"
+- "Read this webpage and tell me..."
+
+These codes will automatically fetch the latest information and provide it to you for accurate responses.
+
+${hasContext && !urlProcessingResult.hasURLs ? `CONTEXT-BASED RESPONSE MODE:
 - The user's message includes relevant information from the MANIT knowledge base
 - Prioritize and use the provided knowledge base information in your response
 - Cite specific details from the knowledge base when answering
 - If the knowledge base information answers their question, use it confidently
-- If additional verification is needed, suggest they contact the appropriate office and include HUMAN_FALLBACK_TRIGGER_7439` : `NO-CONTEXT RESPONSE MODE:
+- If additional verification is needed, suggest they contact the appropriate office and include HUMAN_FALLBACK_TRIGGER_7439` : ''}${urlProcessingResult.hasURLs && urlProcessingResult.urlContent ? `🌐 EXTERNAL WEBSITE CONTENT MODE:
+- The user provided URL(s) and I have fetched and analyzed the content from: ${urlProcessingResult.urlData?.map(u => u.url).join(', ')}
+- The fetched website content is included in the user's message below
+- Focus on answering their question using the EXTERNAL website content provided
+- Clearly distinguish between MANIT information (if any) and external website content
+- If the external content is unrelated to MANIT, clearly state this
+- For MANIT-specific questions, prioritize knowledge base information over external content${hasContext ? '\n- Both external website content AND MANIT knowledge base information are available' : ''}` : ''}${!hasContext && !urlProcessingResult.hasURLs ? `NO-CONTEXT RESPONSE MODE:
 - No specific MANIT information is available for this query
 - Provide general guidance and suggest they contact MANIT offices for accurate details
 - For important queries, include HUMAN_FALLBACK_TRIGGER_7439 to connect them to human support
@@ -182,7 +258,7 @@ ${hasContext ? `CONTEXT-BASED RESPONSE MODE:
   * Academic Office: For exam dates, academic calendar
   * Accounts Office: For fee information
   * Hostel Office: For accommodation queries
-  * Training & Placement: For placement related queries`}
+  * Training & Placement: For placement related queries` : ''}
 
 ${languageInstruction}`;
 
@@ -193,8 +269,16 @@ ${languageInstruction}`;
     console.log('🤖 Model:', model);
     console.log('🌐 Language:', language);
     console.log('🔧 Has Context:', hasContext);
-    console.log('📝 Message Length:', message?.length || 0);
+    console.log('📝 Message Length:', finalMessage?.length || 0);
     console.log('📄 Context Length:', contextualInfo?.length || 0);
+    console.log('🔗 URL Context Length:', urlContext?.length || 0);
+    if (urlProcessingResult.hasURLs) {
+      console.log('🌐 URLs Processed:', urlProcessingResult.urlData?.map(u => u.url).join(', '));
+      console.log('✅ URL content included in LLM prompt');
+      console.log('\n📋 ===== URL CONTENT BEING SENT TO LLM =====');
+      console.log(urlContext.substring(0, 1000) + (urlContext.length > 1000 ? '...[TRUNCATED]' : ''));
+      console.log('📋 ===== END URL CONTENT FOR LLM =====');
+    }
     console.log('💬 History Messages:', conversationMessages.length);
     
     console.log('\n📤 SYSTEM PROMPT BEING SENT TO LLM:');
@@ -264,18 +348,18 @@ ${languageInstruction}`;
           // Safe to add user message
           sarvamMessages.push({
             role: "user",
-            content: message
+            content: finalMessage
           });
         } else {
           // Last message was user, we need to skip it or merge
           console.log('⚠️ Cannot add user message - last message was also from user. Merging with previous.');
           // Instead of adding new message, update the last user message
           if (validatedHistory.length > 0 && validatedHistory[validatedHistory.length - 1].role === 'user') {
-            sarvamMessages[sarvamMessages.length - 1].content += `\n\nAdditional question: ${message}`;
+            sarvamMessages[sarvamMessages.length - 1].content += `\n\nAdditional question: ${finalMessage}`;
           } else {
             sarvamMessages.push({
               role: "user",
-              content: message
+              content: finalMessage
             });
           }
         }
@@ -283,7 +367,7 @@ ${languageInstruction}`;
         // No history, just add current user message
         sarvamMessages.push({
           role: "user", 
-          content: message
+          content: finalMessage
         });
       }
       
@@ -296,7 +380,7 @@ ${languageInstruction}`;
         // Fallback: send only system + current message
         const fallbackMessages = [
           { role: "system", content: systemPrompt },
-          { role: "user", content: message }
+          { role: "user", content: finalMessage }
         ];
         console.log('🔄 Using fallback pattern: system -> user');
         
@@ -333,7 +417,7 @@ ${languageInstruction}`;
         ...conversationMessages, // Add conversation history
         {
           role: "user",
-          content: message
+          content: finalMessage
         }
       ];
       
@@ -357,6 +441,14 @@ ${languageInstruction}`;
     const stream = new ReadableStream({
       async start(controller) {
         try {
+          // APPROACH 2: Show URL reading progress if URLs were processed
+          if (showingURLProgress && urlProcessingResult.urlContent) {
+            const urlProgressMessage = `🔗 **Reading content from your URL${urlProcessingResult.processedURLs > 1 ? 's' : ''}...**\n\n`;
+            const progressData = `data: ${JSON.stringify({ content: urlProgressMessage })}\n\n`;
+            controller.enqueue(encoder.encode(progressData));
+            await new Promise(resolve => setTimeout(resolve, 800));
+          }
+          
           if (provider === 'sarvam') {
             // Handle SarvamAI non-streaming response - simulate streaming by sending chunks progressively
             const fullResponse = chatCompletion.choices?.[0]?.message?.content || '';
@@ -397,12 +489,44 @@ ${languageInstruction}`;
           const doneData = `data: ${JSON.stringify({ done: true })}\n\n`;
           controller.enqueue(encoder.encode(doneData));
           
-          // Log conversation to MongoDB after streaming is complete
+          // Process special triggers after streaming is complete
           if (fullResponseText.trim()) {
             try {
-              await logConversationToMongoDB(message, fullResponseText, language, contextualInfo);
+              // APPROACH 3: Check for and process special triggers with fresh LLM response
+              const processedResponse = await processSpecialTriggers(
+                fullResponseText, 
+                message, 
+                finalMessage, 
+                systemPrompt, 
+                model, 
+                conversationMessages
+              );
+              
+              // If fresh response was generated, send it as replacement
+              if (processedResponse !== fullResponseText) {
+                console.log('📤 Sending fresh LLM response from triggers...');
+                
+                // Send the fresh response
+                const words = processedResponse.split(' ');
+                for (let i = 0; i < words.length; i++) {
+                  const wordToSend = (i > 0 ? ' ' : '') + words[i];
+                  const data = `data: ${JSON.stringify({ content: wordToSend })}\n\n`;
+                  controller.enqueue(encoder.encode(data));
+                  await new Promise(resolve => setTimeout(resolve, 30));
+                }
+                
+                // Update fullResponseText for logging
+                fullResponseText = processedResponse;
+              }
+              
+              // Enhanced contextual info including URL data
+              const enhancedContextualInfo = contextualInfo || '';
+              const urlInfo = urlProcessingResult.hasURLs ? 
+                `\n\n=== URL PROCESSING INFO ===\nProcessed URLs: ${urlProcessingResult.processedURLs}\nURL Content Available: ${!!urlProcessingResult.urlContent}\nURLs: ${urlProcessingResult.urlData?.map(u => u.url).join(', ') || 'None'}\n=== END URL INFO ===` : '';
+              
+              await logConversationToMongoDB(message, fullResponseText, language, enhancedContextualInfo + urlInfo);
             } catch (logError) {
-              console.error('⚠️ Failed to log conversation to MongoDB:', logError.message);
+              console.error('⚠️ Failed to process triggers or log conversation:', logError.message);
               // Don't fail the response - logging is optional
             }
           }
@@ -444,6 +568,276 @@ const AVAILABLE_MODELS = {
   // Groq Models (Alternative - Gemma only)
   'gemma2-9b-it': { provider: 'groq', name: 'Gemma 2 9B', category: 'Alternative' },
 };
+
+// APPROACH 1: High-confidence query detection (very specific patterns)
+function detectHighConfidenceQuery(query) {
+  if (!query || typeof query !== 'string') return null;
+  
+  const normalizedQuery = query.toLowerCase().trim();
+  
+  // Very specific patterns we're 100% confident about
+  const patterns = {
+    notices: [
+      /^(latest\s+)?notices?$/,
+      /^(current\s+)?announcements?$/,
+      /^what\s+are\s+the\s+(latest|current|recent)\s+notices/,
+      /^(show|get|fetch)\s+(latest\s+)?notices/
+    ],
+    scholarship: [
+      /^scholarships?$/,
+      /^(available\s+)?scholarships?\s+(details?|info|information)$/,
+      /^what\s+scholarships?\s+are\s+available/,
+      /^(show|get|list)\s+scholarships?$/
+    ]
+  };
+  
+  for (const [type, regexArray] of Object.entries(patterns)) {
+    for (const regex of regexArray) {
+      if (regex.test(normalizedQuery)) {
+        console.log(`🎯 High-confidence ${type} query detected:`, normalizedQuery);
+        return { type, query: normalizedQuery };
+      }
+    }
+  }
+  
+  return null;
+}
+
+// APPROACH 1: Handle high-confidence queries with pre-fetch
+async function handleHighConfidenceQuery(queryInfo, originalMessage, language, conversationHistory) {
+  console.log(`🚀 Processing high-confidence ${queryInfo.type} query`);
+  
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      try {
+        // Show immediate loading message
+        const loadingMessage = `🔍 **Fetching latest ${queryInfo.type} information...**\n\n*Loading from MANIT website...*`;
+        const data = `data: ${JSON.stringify({ content: loadingMessage })}\n\n`;
+        controller.enqueue(encoder.encode(data));
+        
+        // Wait a moment for the shimmer effect
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        let fetchedContent = '';
+        
+        if (queryInfo.type === 'notices') {
+          // Fetch notices
+          const baseUrl = process.env.NEXTAUTH_URL || process.env.VERCEL_URL || 'http://localhost:3000';
+          const noticesResponse = await fetch(`${baseUrl}/api/notices`);
+          const noticesData = await noticesResponse.json();
+          
+          if (noticesData.success && noticesData.notices) {
+            const latestNotices = noticesData.notices.slice(0, 8);
+            fetchedContent = 'Here are the latest MANIT notices and announcements:\n\n';
+            latestNotices.forEach((notice, index) => {
+              fetchedContent += `${index + 1}. **${notice.title}**\n`;
+              if (notice.date) fetchedContent += `   📅 ${notice.date}\n`;
+              if (notice.link) fetchedContent += `   🔗 ${notice.link}\n`;
+              fetchedContent += '\n';
+            });
+            fetchedContent += '\n*Source: MANIT Official Website*';
+          }
+        } else if (queryInfo.type === 'scholarship') {
+          // Fetch scholarship info
+          const { fetchURLContent } = await import('../../../lib/urlUtils.js');
+          const scholarshipUrl = 'https://www.manit.ac.in/content/scholarship';
+          const scholarshipData = await fetchURLContent(scholarshipUrl);
+          
+          if (scholarshipData && scholarshipData.success) {
+            fetchedContent = `Here's the latest scholarship information from MANIT:\n\n**${scholarshipData.title}**\n\n`;
+            fetchedContent += scholarshipData.content.substring(0, 2000) + '...\n\n';
+            fetchedContent += `📖 *For complete details, visit: ${scholarshipUrl}*`;
+          }
+        }
+        
+        if (fetchedContent) {
+          // Stream the fetched content
+          const words = fetchedContent.split(' ');
+          for (let i = 0; i < words.length; i++) {
+            const wordToSend = (i > 0 ? ' ' : '') + words[i];
+            const data = `data: ${JSON.stringify({ content: wordToSend })}\n\n`;
+            controller.enqueue(encoder.encode(data));
+            await new Promise(resolve => setTimeout(resolve, 40));
+          }
+        } else {
+          const errorMessage = `Sorry, I couldn't fetch the latest ${queryInfo.type} information right now. Please check the MANIT website directly or try again later.`;
+          const data = `data: ${JSON.stringify({ content: errorMessage })}\n\n`;
+          controller.enqueue(encoder.encode(data));
+        }
+        
+        // Send completion signal
+        const doneData = `data: ${JSON.stringify({ done: true })}\n\n`;
+        controller.enqueue(encoder.encode(doneData));
+        
+        // Log to MongoDB
+        try {
+          await dbConnect();
+          const chatDoc = new Chat({
+            message: originalMessage,
+            response: fetchedContent || `Failed to fetch ${queryInfo.type}`,
+            timestamp: new Date(),
+            language: language || 'English',
+            hasContext: true,
+            contextInfo: `High-confidence ${queryInfo.type} query`,
+            model: 'high_confidence_fetch'
+          });
+          await chatDoc.save();
+          console.log('📊 High-confidence query logged to MongoDB');
+        } catch (dbError) {
+          console.warn('Database logging failed:', dbError.message);
+        }
+        
+        controller.close();
+        
+      } catch (error) {
+        console.error(`High-confidence ${queryInfo.type} query error:`, error);
+        const errorData = `data: ${JSON.stringify({ error: `Failed to fetch ${queryInfo.type}: ${error.message}` })}\n\n`;
+        controller.enqueue(encoder.encode(errorData));
+        controller.close();
+      }
+    }
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive'
+    }
+  });
+}
+
+// APPROACH 3: Process special triggers and get fresh LLM response
+async function processSpecialTriggers(responseText, originalMessage, finalMessage, systemPrompt, model, conversationMessages) {
+  console.log('🔍 Checking for special triggers in response...');
+  
+  let hasTriggered = false;
+  let fetchedData = '';
+  
+  // Check for NOTICE_FETCH_7439
+  if (responseText.includes('NOTICE_FETCH_7439')) {
+    console.log('📢 NOTICE_FETCH trigger detected - fetching latest notices...');
+    hasTriggered = true;
+    try {
+      const baseUrl = process.env.NEXTAUTH_URL || process.env.VERCEL_URL || 'http://localhost:3000';
+      const noticesResponse = await fetch(`${baseUrl}/api/notices`);
+      const noticesData = await noticesResponse.json();
+      
+      if (noticesData.success && noticesData.notices) {
+        const latestNotices = noticesData.notices.slice(0, 5);
+        fetchedData += '\n\n=== LATEST MANIT NOTICES ===\n';
+        latestNotices.forEach((notice, index) => {
+          fetchedData += `${index + 1}. ${notice.title}\n`;
+          if (notice.date) fetchedData += `   Date: ${notice.date}\n`;
+          if (notice.link) fetchedData += `   Link: ${notice.link}\n`;
+          fetchedData += '\n';
+        });
+        fetchedData += '=== END NOTICES ===\n';
+      }
+    } catch (error) {
+      console.error('❌ Error fetching notices:', error);
+    }
+  }
+  
+  // Check for SCHOLARSHIP_FETCH_7439
+  if (responseText.includes('SCHOLARSHIP_FETCH_7439')) {
+    console.log('🎓 SCHOLARSHIP_FETCH trigger detected - fetching scholarship info...');
+    hasTriggered = true;
+    try {
+      const scholarshipUrl = 'https://www.manit.ac.in/content/scholarship';
+      const { fetchURLContent } = await import('../../../lib/urlUtils.js');
+      const scholarshipData = await fetchURLContent(scholarshipUrl);
+      
+      if (scholarshipData && scholarshipData.success) {
+        fetchedData += '\n\n=== SCHOLARSHIP INFORMATION ===\n';
+        fetchedData += `Title: ${scholarshipData.title}\n`;
+        fetchedData += `Content: ${scholarshipData.content.substring(0, 1500)}\n`;
+        fetchedData += `Source: ${scholarshipUrl}\n`;
+        fetchedData += '=== END SCHOLARSHIP INFO ===\n';
+      }
+    } catch (error) {
+      console.error('❌ Error fetching scholarship info:', error);
+    }
+  }
+  
+  // Check for URL_FETCH_7439{"url": "..."}
+  const urlFetchRegex = /URL_FETCH_7439\s*\{[^}]*"url"\s*:\s*"([^"]+)"[^}]*\}/gi;
+  let urlMatch;
+  while ((urlMatch = urlFetchRegex.exec(responseText)) !== null) {
+    const url = urlMatch[1];
+    console.log(`🌐 URL_FETCH trigger detected for: ${url}`);
+    hasTriggered = true;
+    
+    try {
+      const { fetchURLContent } = await import('../../../lib/urlUtils.js');
+      const urlData = await fetchURLContent(url);
+      
+      if (urlData && urlData.success) {
+        fetchedData += `\n\n=== CONTENT FROM ${url} ===\n`;
+        fetchedData += `Title: ${urlData.title}\n`;
+        fetchedData += `Content: ${urlData.content.substring(0, 1500)}\n`;
+        fetchedData += `=== END URL CONTENT ===\n`;
+      }
+    } catch (error) {
+      console.error(`❌ Error fetching URL ${url}:`, error);
+    }
+  }
+  
+  // If triggers were found, get fresh LLM response with additional data
+  if (hasTriggered && fetchedData) {
+    console.log('🔄 Triggers detected - getting fresh LLM response with additional data...');
+    
+    const enhancedPrompt = finalMessage + fetchedData + 
+      '\n\nBased on the above information I just fetched, please provide a comprehensive and helpful response to the user.';
+    
+    try {
+      // Get fresh response from LLM
+      const messages = [
+        { role: "system", content: systemPrompt },
+        ...conversationMessages,
+        { role: "user", content: enhancedPrompt }
+      ];
+      
+      if (model.includes('sarvam')) {
+        const sarvam = (await import('sarvamai')).SarvamAIClient;
+        const sarvamClient = new sarvam({ apiSubscriptionKey: process.env.SARVAM_API_KEY });
+        const freshResponse = await sarvamClient.chat.completions({
+          messages: messages,
+          model: model,
+          temperature: 0.7,
+          max_tokens: 1024,
+          stream: false
+        });
+        
+        return freshResponse.choices?.[0]?.message?.content || responseText;
+      } else {
+        const groq = (await import('groq-sdk')).Groq;
+        const groqClient = new groq({ apiKey: process.env.GROQ_API_KEY });
+        const freshResponse = await groqClient.chat.completions.create({
+          messages: messages,
+          model: model,
+          temperature: 0.7,
+          max_tokens: 1024,
+          stream: false
+        });
+        
+        return freshResponse.choices?.[0]?.message?.content || responseText;
+      }
+    } catch (error) {
+      console.error('❌ Error getting fresh LLM response:', error);
+      // Fallback: remove triggers and add basic content
+      let processedResponse = responseText
+        .replace(/NOTICE_FETCH_7439/g, '')
+        .replace(/SCHOLARSHIP_FETCH_7439/g, '')
+        .replace(urlFetchRegex, '');
+      
+      return processedResponse + '\n\n' + fetchedData;
+    }
+  }
+  
+  return responseText;
+}
 
 // Validate model selection
 function validateModel(model) {

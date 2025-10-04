@@ -4,7 +4,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import InteractiveMap from './components/InteractiveMap';
+import ContactButton from './components/ContactButton';
 import { renderTextWithMaps, parseMapCoordinates } from '../lib/mapUtils';
+import { renderTextWithContacts } from '../lib/contactUtils';
 import { 
   Bot, 
   User, 
@@ -28,105 +30,79 @@ import {
   Phone
 } from 'lucide-react';
 
-// Helper function to check if message contains maps
-const hasMapContent = (messageText) => {
+// Helper function to check if message contains maps or contacts
+const hasInteractiveContent = (messageText) => {
   const mapPattern = /MAP_COORDINATES\{[^}]+\}/g;
-  return mapPattern.test(messageText);
+  const emailPattern = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
+  const phonePattern = /\+?[\d\s\-\(\)]{8,}/;
+  
+  return mapPattern.test(messageText) || emailPattern.test(messageText) || phonePattern.test(messageText);
 };
 
-// Component to render messages with embedded maps
-const MessageWithMaps = ({ messageText, className = "" }) => {
-  console.log('🔍 MessageWithMaps received text:', messageText.substring(0, 200) + '...');
-  const { text, maps } = renderTextWithMaps(messageText, InteractiveMap);
-  console.log('🗺️ Maps found:', maps?.length || 0);
-  console.log('📝 Processed text:', text.substring(0, 200) + '...');
+// Component to render messages with embedded maps and contact buttons
+const MessageWithElements = ({ messageText, className = "" }) => {
+  console.log('🔍 MessageWithElements received text:', messageText.substring(0, 200) + '...');
   
-  // Standard markdown components for consistency with text wrapping
-  const markdownComponents = {
-    p: ({ children }) => <p className="mb-2 last:mb-0 break-words overflow-wrap-anywhere">{children}</p>,
-    strong: ({ children }) => <strong className="font-bold text-gray-900 break-words">{children}</strong>,
-    em: ({ children }) => <em className="italic break-words">{children}</em>,
-    ul: ({ children }) => <ul className="list-disc ml-4 mb-2">{children}</ul>,
-    ol: ({ children }) => <ol className="list-decimal ml-4 mb-2">{children}</ol>,
-    li: ({ children }) => <li className="mb-1 break-words">{children}</li>,
-    code: ({ children }) => <code className="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono text-gray-800 break-all">{children}</code>,
-    pre: ({ children }) => <pre className="bg-gray-100 p-2 rounded text-sm font-mono overflow-x-auto mb-2 whitespace-pre-wrap break-words">{children}</pre>,
-    h1: ({ children }) => <h1 className="text-lg font-bold mb-2 break-words">{children}</h1>,
-    h2: ({ children }) => <h2 className="text-md font-bold mb-2 break-words">{children}</h2>,
-    h3: ({ children }) => <h3 className="text-sm font-bold mb-1 break-words">{children}</h3>,
-    blockquote: ({ children }) => <blockquote className="border-l-4 border-gray-300 pl-3 italic mb-2 break-words">{children}</blockquote>,
-    a: ({ children, href }) => <a href={href} className="text-blue-600 hover:underline break-words" target="_blank" rel="noopener noreferrer">{children}</a>
-  };
-
-  if (!maps || maps.length === 0) {
-    return (
-      <div className={className}>
-        <ReactMarkdown components={markdownComponents}>
-          {messageText}
-        </ReactMarkdown>
-      </div>
-    );
-  }
-
-  // Split text by map placeholders and render inline maps
-  const parts = [];
-  let remainingText = text;
-
-  maps.forEach((map, index) => {
-    const placeholderIndex = remainingText.indexOf(map.placeholder);
-    
-    if (placeholderIndex !== -1) {
-      // Add text before the placeholder
-      if (placeholderIndex > 0) {
-        parts.push({
-          type: 'text',
-          content: remainingText.substring(0, placeholderIndex),
-          key: `text_${index}_before`
-        });
-      }
-      
-      // Add the inline map
-      parts.push({
-        type: 'map',
-        content: map,
-        key: `map_${index}`
-      });
-      
-      // Continue with remaining text
-      remainingText = remainingText.substring(placeholderIndex + map.placeholder.length);
-    }
-  });
-
-  // Add any remaining text
-  if (remainingText.trim()) {
-    parts.push({
-      type: 'text',
-      content: remainingText,
-      key: 'text_final'
-    });
-  }
+  // First process maps
+  const { text: textAfterMaps, maps } = renderTextWithMaps(messageText, InteractiveMap);
+  console.log('🗺️ Maps found:', maps?.length || 0);
+  
+  // Then process contacts on the remaining text
+  const { text: finalText, contacts } = renderTextWithContacts(textAfterMaps, ContactButton);
+  console.log('📞 Contacts found:', contacts?.length || 0);
+  console.log('📝 Final processed text:', finalText.substring(0, 200) + '...');
 
   return (
-    <div className={`${className} overflow-hidden`}>
-      {parts.map((part) => (
-        <div key={part.key} className="w-full overflow-hidden">
-          {part.type === 'text' ? (
-            <div className="break-words overflow-wrap-anywhere">
-              <ReactMarkdown components={markdownComponents}>
-                {part.content}
-              </ReactMarkdown>
+    <div className={className}>
+      <ReactMarkdown 
+        components={{
+          p: ({ children }) => <div className="mb-2">{children}</div>,
+          ol: ({ children }) => <ol className="list-decimal list-inside space-y-1 ml-4 mb-2">{children}</ol>,
+          ul: ({ children }) => <ul className="list-disc list-inside space-y-1 ml-4 mb-2">{children}</ul>,
+          li: ({ children }) => <li className="mb-1">{children}</li>,
+          strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+          em: ({ children }) => <em className="italic">{children}</em>,
+          code: ({ children, inline }) => 
+            inline ? 
+              <code className="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono">{children}</code> :
+              <div className="my-2">
+                <pre className="bg-gray-100 p-3 rounded-lg overflow-x-auto">
+                  <code className="text-sm font-mono">{children}</code>
+                </pre>
+              </div>,
+          pre: ({ children }) => 
+            <div className="my-2">
+              <pre className="bg-gray-100 p-3 rounded-lg overflow-x-auto">{children}</pre>
+            </div>,
+          blockquote: ({ children }) => 
+            <blockquote className="border-l-4 border-blue-200 pl-4 py-2 my-2 bg-blue-50 italic">
+              {children}
+            </blockquote>,
+          h1: ({ children }) => <h1 className="text-2xl font-bold mb-3 mt-4">{children}</h1>,
+          h2: ({ children }) => <h2 className="text-xl font-bold mb-2 mt-3">{children}</h2>,
+          h3: ({ children }) => <h3 className="text-lg font-bold mb-2 mt-2">{children}</h3>,
+        }}
+      >
+        {finalText}
+      </ReactMarkdown>
+      {maps && maps.length > 0 && (
+        <div className="mt-3 space-y-2">
+          {maps.map((mapComponent, index) => (
+            <div key={index}>
+              {mapComponent}
             </div>
-          ) : (
-            <div className="my-1 w-full overflow-hidden">
-              <InteractiveMap
-                coordinates={part.content.coordinates}
-                title={part.content.title}
-                description={part.content.description}
-              />
-            </div>
-          )}
+          ))}
         </div>
-      ))}
+      )}
+      {contacts && contacts.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {contacts.map((contactComponent, index) => (
+            <div key={index}>
+              {contactComponent}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -902,12 +878,24 @@ Please answer my question using the relevant information provided above. Be spec
               if (line.startsWith('data: ')) {
                 try {
                   const data = JSON.parse(line.slice(6));
-                  if (data.content) {
-                    fullResponse += data.content;
+                  if (data.content !== undefined) {
+                    // Handle replace flag for shimmer/loading messages
+                    if (data.replace === true) {
+                      fullResponse = data.content; // Replace entire content
+                    } else {
+                      fullResponse += data.content; // Append content
+                    }
                     
                     // Check for fallback trigger and clean from display during streaming
                     const hasFallbackTrigger = fullResponse.includes('HUMAN_FALLBACK_TRIGGER_7439');
-                    const displayResponse = fullResponse.replace(/HUMAN_FALLBACK_TRIGGER_7439/g, '').trim();
+                    
+                    // Clean fallback trigger from display, handling markdown formatting
+                    let displayResponse = fullResponse
+                      .replace(/\*\*HUMAN_FALLBACK_TRIGGER_7439\*\*/g, '') // Bold markdown
+                      .replace(/\*HUMAN_FALLBACK_TRIGGER_7439\*/g, '')     // Italic markdown
+                      .replace(/HUMAN_FALLBACK_TRIGGER_7439/g, '')         // Plain text
+                      .replace(/\*\*\s*\*\*/g, '')                         // Clean up empty bold markers with spaces
+                      .trim();
                     
                     // Debug logging for fallback trigger
                     if (hasFallbackTrigger) {
@@ -934,7 +922,14 @@ Please answer my question using the relevant information provided above. Be spec
           
           // Check for fallback trigger and clean the response before displaying
           const hasFallbackTrigger = fullResponse.includes('HUMAN_FALLBACK_TRIGGER_7439');
-          const cleanedResponse = fullResponse.replace(/HUMAN_FALLBACK_TRIGGER_7439/g, '').trim();
+          
+          // Clean fallback trigger from final response, handling markdown formatting
+          const cleanedResponse = fullResponse
+            .replace(/\*\*HUMAN_FALLBACK_TRIGGER_7439\*\*/g, '') // Bold markdown
+            .replace(/\*HUMAN_FALLBACK_TRIGGER_7439\*/g, '')     // Italic markdown
+            .replace(/HUMAN_FALLBACK_TRIGGER_7439/g, '')         // Plain text
+            .replace(/\*\*\s*\*\*/g, '')                         // Clean up empty bold markers with spaces
+            .trim();
           
           // Debug logging for final fallback trigger
           console.log('🔔 Final response analysis:', {
@@ -1524,7 +1519,7 @@ Please answer my question using the relevant information provided above. Be spec
           
           {messages.map((message, index) => (
             <div key={index} className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`flex items-start space-x-2 max-w-[90vw] ${hasMapContent(message.text) ? 'lg:max-w-sm xl:max-w-lg' : 'lg:max-w-xs xl:max-w-md'} ${message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}>
+              <div className={`flex items-start space-x-2 max-w-[90vw] ${hasInteractiveContent(message.text) ? 'lg:max-w-sm xl:max-w-lg' : 'lg:max-w-xs xl:max-w-md'} ${message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}>
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
                   message.sender === 'user' ? 'bg-blue-600' : 'bg-gray-200'
                 }`}>
@@ -1544,7 +1539,7 @@ Please answer my question using the relevant information provided above. Be spec
                   ) : (
                     <div className="flex items-start justify-between gap-2 min-w-0">
                       <div className="text-gray-800 min-w-0 flex-1">
-                        <MessageWithMaps 
+                        <MessageWithElements 
                           messageText={message.text}
                           className="text-sm"
                         />
@@ -2014,7 +2009,7 @@ Please answer my question using the relevant information provided above. Be spec
             <>
               {messages.map((message) => (
                 <div key={message.id} className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`flex items-end space-x-2 max-w-[90vw] ${hasMapContent(message.text) ? 'lg:max-w-sm xl:max-w-lg' : 'lg:max-w-xs xl:max-w-md'} ${message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}>
+                  <div className={`flex items-end space-x-2 max-w-[90vw] ${hasInteractiveContent(message.text) ? 'lg:max-w-sm xl:max-w-lg' : 'lg:max-w-xs xl:max-w-md'} ${message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}>
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
                       message.sender === 'user' 
                         ? 'bg-blue-500' 
@@ -2036,7 +2031,7 @@ Please answer my question using the relevant information provided above. Be spec
                         <p className="text-white font-semibold break-words overflow-wrap-anywhere">{message.text}</p>
                       ) : (
                         <div className="text-gray-800 font-semibold min-w-0">
-                          <MessageWithMaps messageText={message.text} />
+                          <MessageWithElements messageText={message.text} />
                         </div>
                       )}
                       {message.isStreaming && (
